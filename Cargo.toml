@@ -37,21 +37,25 @@ dtls = ["constellation-channels/dtls"]
 gssapi = ["constellation-auth/gssapi",
           "constellation-channels/gssapi",
           "constellation-common/gssapi",
+          "constellation-standalone/gssapi",
           "constellation-streams/gssapi"]
 log = ["dep:log",
        "constellation-auth/log",
        "constellation-channels/log",
        "constellation-common/log",
+       "constellation-standalone/log",
        "constellation-streams/log"]
 openssl = ["constellation-auth/openssl",
            "constellation-channels/openssl",
            "constellation-common/openssl",
+           "constellation-standalone/openssl",
            "constellation-streams/openssl"]
 socks5 = ["constellation-channels/socks5"]
 tls = ["constellation-channels/tls"]
 unix = ["constellation-auth/unix",
         "constellation-channels/unix",
         "constellation-common/unix",
+        "constellation-standalone/unix",
         "constellation-streams/unix"]
 
 [dependencies]
@@ -64,5 +68,6 @@ log = { version = "0.4", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
+constellation-standalone = { git = "https://github.com/constellation-system/constellation-standalone.git", branch = "project/ioc", default-features = false }
 env_logger = { version = "0.10" }
 serde_yaml = { version = "0.9" }
