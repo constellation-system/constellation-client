@@ -15,3 +15,22 @@
 // You should have received a copy of the GNU Affero General Public
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
+
+use constellation_channels::config::ThreadedNSNameCachesConfig;
+use serde::Deserialize;
+use serde::Serialize;
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, PartialOrd, Serialize)]
+#[serde(rename = "peer-config")]
+#[serde(rename_all = "kebab-case")]
+pub struct ExampleConfig {
+    /// Name cache configuration.
+    #[serde(default)]
+    name_caches: ThreadedNSNameCachesConfig,
+}
+
+impl ExampleConfig {
+    pub fn take(self) -> ThreadedNSNameCachesConfig {
+        self.name_caches
+    }
+}

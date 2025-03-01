@@ -16,5 +16,12 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
+mod cmdline;
+mod config;
+
+use constellation_standalone::StandaloneApp;
+use crate::cmdline::StandaloneCmdLine;
+
 fn main() {
+    StandaloneCmdLine::main()
 }

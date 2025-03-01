@@ -16,4 +16,65 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
+use std::convert::Infallible;
+
+use clap::ArgMatches;
+use constellation_common::shutdown::ShutdownFlag;
+use constellation_common::version::FullVersion;
+use constellation_common::version::Version;
+use constellation_common::version::VersionSuffix;
+use constellation_standalone::Standalone;
+use constellation_standalone::StandaloneApp;
+use log::error;
+use log::info;
+
+use crate::config::ExampleConfig;
+
 pub struct StandaloneCmdLine;
+
+impl Standalone for StandaloneCmdLine {
+    const NAME: &str = "cmdline";
+    const CONFIG_FILES: &[&str] = &[
+        "cmdline.conf"
+    ];
+    const VERSION: FullVersion = FullVersion::new(
+        None,
+        Version::new(0, 0, 0),
+        Some(VersionSuffix::Development)
+    );
+    type Config = ExampleConfig;
+    type CreateCleanup = ();
+
+    fn create(
+        _args: ArgMatches,
+        _config: Self::Config
+    ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
+        Ok((StandaloneCmdLine, ()))
+    }
+}
+
+impl StandaloneApp for StandaloneCmdLine {
+    type RunErrorCleanup = Infallible;
+
+    fn run(
+        self,
+        _shutdown: ShutdownFlag
+    ) -> Result<(), Self::RunErrorCleanup> {
+        info!(target: "example",
+              "starting example");
+
+        Ok(())
+    }
+
+    fn cleanup(
+        _create: Self::CreateCleanup,
+    ) {}
+
+    fn cleanup_err(
+        _create: Self::CreateCleanup,
+        _run: Self::RunErrorCleanup
+    ) {
+        error!(target: "example",
+               "this should never be called");
+    }
+}
