@@ -33,17 +33,16 @@ use crate::config::ExampleConfig;
 pub struct StandaloneCmdLine;
 
 impl Standalone for StandaloneCmdLine {
+    type Config = ExampleConfig;
+    type CreateCleanup = ();
+
+    const CONFIG_FILES: &[&str] = &["cmdline.conf"];
     const NAME: &str = "cmdline";
-    const CONFIG_FILES: &[&str] = &[
-        "cmdline.conf"
-    ];
     const VERSION: FullVersion = FullVersion::new(
         None,
         Version::new(0, 0, 0),
         Some(VersionSuffix::Development)
     );
-    type Config = ExampleConfig;
-    type CreateCleanup = ();
 
     fn create(
         _args: ArgMatches,
@@ -66,9 +65,7 @@ impl StandaloneApp for StandaloneCmdLine {
         Ok(())
     }
 
-    fn cleanup(
-        _create: Self::CreateCleanup,
-    ) {}
+    fn cleanup(_create: Self::CreateCleanup) {}
 
     fn cleanup_err(
         _create: Self::CreateCleanup,

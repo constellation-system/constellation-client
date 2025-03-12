@@ -20,13 +20,15 @@ use constellation_channels::config::ThreadedNSNameCachesConfig;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Clone, Debug, Default, Deserialize, PartialEq, PartialOrd, Serialize,
+)]
 #[serde(rename = "peer-config")]
 #[serde(rename_all = "kebab-case")]
 pub struct ExampleConfig {
     /// Name cache configuration.
     #[serde(default)]
-    name_caches: ThreadedNSNameCachesConfig,
+    name_caches: ThreadedNSNameCachesConfig
 }
 
 impl ExampleConfig {
