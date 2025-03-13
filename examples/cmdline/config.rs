@@ -16,22 +16,39 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
+use constellation_channels::config::ChannelRegistryChannelsConfig;
+use constellation_channels::config::CompoundFarEndpoint;
 use constellation_channels::config::ThreadedNSNameCachesConfig;
+use constellation_client::config::MulticastClientConfig;
+use constellation_common::codec::DatagramCodec;
+use constellation_common::ids::AscendingCount;
+use constellation_common::ids::IDGen;
+use constellation_streams::large_obj::LargeObjMsg;
+use constellation_streams::large_obj::LargeObjMsgCodec;
 use serde::Deserialize;
 use serde::Serialize;
 
 #[derive(
     Clone, Debug, Default, Deserialize, PartialEq, PartialOrd, Serialize,
 )]
-#[serde(rename = "peer-config")]
+#[serde(rename = "example")]
 #[serde(rename_all = "kebab-case")]
-pub struct ExampleConfig {
+pub struct CmdlineConfig {
     /// Name cache configuration.
     #[serde(default)]
-    name_caches: ThreadedNSNameCachesConfig
+    name_caches: ThreadedNSNameCachesConfig,
+    #[serde(flatten)]
+    multicast: MulticastClientConfig<
+            String,
+        ChannelRegistryChannelsConfig<
+            <LargeObjMsgCodec as DatagramCodec<LargeObjMsg>>::Param
+        >,
+        <AscendingCount as IDGen>::Config,
+        CompoundFarEndpoint
+    >
 }
 
-impl ExampleConfig {
+impl CmdlineConfig {
     pub fn take(self) -> ThreadedNSNameCachesConfig {
         self.name_caches
     }

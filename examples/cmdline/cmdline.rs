@@ -19,6 +19,8 @@
 use std::convert::Infallible;
 
 use clap::ArgMatches;
+use constellation_client::component::multicast::CompoundMulticastClientComponent;
+use constellation_client::session::MulticastClientSession;
 use constellation_common::shutdown::ShutdownFlag;
 use constellation_common::version::FullVersion;
 use constellation_common::version::Version;

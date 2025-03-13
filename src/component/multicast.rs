@@ -177,12 +177,12 @@ pub struct MulticastClientComponent<
     resolver: PhantomData<Resolver>,
     session: PhantomData<Session>,
     config: MulticastClientConfig<
-        Session::Config,
         AuthN::Prin,
         ChannelRegistryChannelsConfig<MsgCodec::Param>,
         Epochs::Config,
         Endpoint
     >,
+    session_config: Session::Config,
     listener: ThreadedFlowsListener<
         <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
         StreamID<
@@ -305,6 +305,40 @@ where
         + Send
         + Sync
 {
+    pub fn create(
+        config: MulticastClientConfig<
+            AuthN::Prin,
+            ChannelRegistryChannelsConfig<MsgCodec::Param>,
+            Epochs::Config,
+            Endpoint
+        >,
+        session_config: Session::Config,
+        listener: ThreadedFlowsListener<
+            <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
+            StreamID<
+                <Channel::Xfrm as DatagramXfrm>::PeerAddr,
+                F::ChannelID,
+                Channel::Param
+            >,
+            AuthN::Prin
+        >,
+        shutdown: ShutdownFlag,
+        ctx: Ctx
+    ) -> Self {
+        MulticastClientComponent {
+            channel: PhantomData,
+            flow: PhantomData,
+            xfrm: PhantomData,
+            resolver: PhantomData,
+            session: PhantomData,
+            config: config,
+            session_config: session_config,
+            listener: listener,
+            shutdown: shutdown,
+            ctx: ctx
+        }
+    }
+
     pub fn start(
         self
     ) -> Result<
@@ -348,6 +382,7 @@ where
         >
     >{
         let MulticastClientComponent {
+            session_config,
             config,
             listener,
             ctx,
@@ -358,7 +393,7 @@ where
         info!(target: "multicast-client-component",
               "starting multicast client component");
 
-        let (self_party, session_config, multicast_config) = config.take();
+        let (self_party, multicast_config) = config.take();
         let (session, msgs, notify, recv) = Session::create(session_config)
             .map_err(|err| MulticastClientComponentRunError::Session {
                 err: err

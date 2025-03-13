@@ -24,15 +24,13 @@ use serde::Serialize;
 #[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
 #[serde(rename = "multicast-client")]
 #[serde(rename_all = "kebab-case")]
-pub struct MulticastClientConfig<Session, PartyID, Channels, Epochs, Endpoint>
+pub struct MulticastClientConfig<PartyID, Channels, Epochs, Endpoint>
 where
     Channels: Default,
     Epochs: Default {
     /// Party identitfying this node.
     #[serde(rename = "self")]
     self_party: PartyID,
-    #[serde(flatten)]
-    session: Session,
     #[serde(flatten)]
     multicast: MulticastCommConfig<PartyID, Channels, Epochs, Endpoint>
 }
@@ -85,8 +83,8 @@ where
     }
 }
 
-impl<Session, PartyID, Channels, Epochs, Endpoint>
-    MulticastClientConfig<Session, PartyID, Channels, Epochs, Endpoint>
+impl<PartyID, Channels, Epochs, Endpoint>
+    MulticastClientConfig<PartyID, Channels, Epochs, Endpoint>
 where
     Channels: Default,
     Epochs: Default
@@ -94,24 +92,17 @@ where
     #[inline]
     pub fn new(
         self_party: PartyID,
-        session: Session,
         multicast: MulticastCommConfig<PartyID, Channels, Epochs, Endpoint>
     ) -> Self {
         MulticastClientConfig {
             self_party: self_party,
             multicast: multicast,
-            session: session
         }
     }
 
     #[inline]
     pub fn self_party(&self) -> &PartyID {
         &self.self_party
-    }
-
-    #[inline]
-    pub fn session(&self) -> &Session {
-        &self.session
     }
 
     #[inline]
@@ -126,9 +117,8 @@ where
         self
     ) -> (
         PartyID,
-        Session,
         MulticastCommConfig<PartyID, Channels, Epochs, Endpoint>
     ) {
-        (self.self_party, self.session, self.multicast)
+        (self.self_party, self.multicast)
     }
 }
