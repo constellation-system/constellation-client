@@ -61,16 +61,13 @@ use constellation_common::net::DatagramXfrm;
 use constellation_common::net::DatagramXfrmCreate;
 use constellation_common::net::IPEndpointAddr;
 use constellation_common::net::Socket;
-use constellation_common::sched::DenseItemID;
 use constellation_common::shutdown::ShutdownFlag;
 use constellation_component_common::comm::multicast::MulticastComm;
 use constellation_component_common::comm::multicast::MulticastCommCleanup;
 use constellation_component_common::comm::multicast::MulticastCommRunError;
-use constellation_component_common::PartyStreamIdx;
 use constellation_streams::addrs::Addrs;
 use constellation_streams::addrs::AddrsCreate;
 use constellation_streams::channels::ChannelParam;
-use constellation_streams::error::ErrorReportInfo;
 use constellation_streams::select::StreamSelectorCreateError;
 use constellation_streams::select::ThreadedStreamSelectorError;
 use constellation_streams::stream::ConcurrentStream;
@@ -123,8 +120,6 @@ pub struct MulticastClientComponent<
     AuthN::Prin: 'static + Clone + Display + Eq + Hash + Send,
     MsgCodec: Clone + DatagramCodec<Session::Msg> + Send,
     <MsgCodec as DatagramCodec<Session::Msg>>::Param: Default,
-    <MsgCodec as DatagramCodec<Session::Msg>>::EncodeError:
-        ErrorReportInfo<DenseItemID<usize>>,
     Channel:
         FarChannelOwnedFlows<F, AuthN, Xfrm> + FarChannelCreate + Send + Sync,
     Channel::Acquired: FarChannelAcquiredResolve<Resolved = Channel::Param>,
@@ -205,9 +200,10 @@ where
 }
 
 #[derive(Debug)]
-pub enum MulticastClientComponentRunError<Session, Multicast> {
+pub enum MulticastClientComponentRunError<Session, Multicast, Start> {
     Session { err: Session },
     Multicast { err: Multicast },
+    Start { err: Start },
     SkippedIdx
 }
 
@@ -249,8 +245,6 @@ where
     AuthN::Prin: 'static + Clone + Display + Eq + Hash + Send,
     MsgCodec: 'static + Clone + DatagramCodec<Session::Msg> + Send,
     <MsgCodec as DatagramCodec<Session::Msg>>::Param: Default,
-    <MsgCodec as DatagramCodec<Session::Msg>>::EncodeError:
-        ErrorReportInfo<DenseItemID<usize>>,
     Channel: 'static
         + FarChannelOwnedFlows<F, AuthN, Xfrm>
         + FarChannelCreate
@@ -377,8 +371,9 @@ where
                             <Channel::Acquired as FarChannelAcquired>::WrapError
                         >
                     >
-                >
-            >
+                >,
+            >,
+            Session::StartError
         >
     >{
         let MulticastClientComponent {
@@ -424,31 +419,13 @@ where
         .map_err(|err| {
             MulticastClientComponentRunError::Multicast { err: err }
         })?;
-        let party_data = match multicast.parties() {
-            Ok(parties) => {
-                let mut parties: Vec<(PartyStreamIdx, AuthN::Prin)> =
-                    parties.collect();
-
-                parties.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
-
-                let mut party_data = Vec::with_capacity(parties.len());
-
-                for (idx, party) in parties.into_iter() {
-                    let idx: usize = idx.into();
-
-                    if idx == party_data.len() {
-                        party_data.push(party)
-                    } else {
-                        return Err(
-                            MulticastClientComponentRunError::SkippedIdx
-                        );
-                    }
-                }
-
-                party_data
-            }
+        let parties = match multicast.parties() {
+            Ok(parties) => parties
         };
-        let session_cleanup = session.start(party_data);
+        let session_cleanup = session.start(parties)
+            .map_err(|err| MulticastClientComponentRunError::Start {
+                err: err
+            })?;
 
         debug!(target: "multicast-client-component",
                "starting multicaster");
@@ -474,17 +451,18 @@ where
             session
         } = self;
 
-        shutdown.set();
+//        shutdown.set();
         multicast.cleanup();
         session.cleanup();
     }
 }
 
-impl<Session, Multicast> Display
-    for MulticastClientComponentRunError<Session, Multicast>
+impl<Session, Multicast, Start> Display
+    for MulticastClientComponentRunError<Session, Multicast, Start>
 where
     Session: Display,
-    Multicast: Display
+    Multicast: Display,
+    Start: Display,
 {
     fn fmt(
         &self,
@@ -493,6 +471,7 @@ where
         match self {
             MulticastClientComponentRunError::Session { err } => err.fmt(f),
             MulticastClientComponentRunError::Multicast { err } => err.fmt(f),
+            MulticastClientComponentRunError::Start { err } => err.fmt(f),
             MulticastClientComponentRunError::SkippedIdx => {
                 write!(f, "stream parties skipped an index")
             }

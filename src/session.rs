@@ -27,6 +27,7 @@ use constellation_component_common::PartyStreamIdx;
 pub trait MulticastClientSession<Prin>: Sized {
     type Config;
     type CreateError: Display;
+    type StartError: Display;
     type Msg: Clone + Send;
     type Msgs: Clone + SharedMsgs<PartyStreamIdx, Self::Msg> + Send;
     type Recv: Clone + AuthNMsgRecv<Prin, Self::Msg> + Send;
@@ -36,10 +37,11 @@ pub trait MulticastClientSession<Prin>: Sized {
         config: Self::Config
     ) -> Result<(Self, Self::Msgs, Notify, Self::Recv), Self::CreateError>;
 
-    fn start(
+    fn start<I>(
         self,
-        parties: Vec<Prin>
-    ) -> Self::Cleanup;
+        parties: I
+    ) -> Result<Self::Cleanup, Self::StartError>
+    where I: Iterator<Item = (PartyStreamIdx, Prin)>;
 }
 
 pub trait UnicastClientSession<Prin>: Sized {

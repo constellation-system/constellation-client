@@ -21,8 +21,8 @@ mod config;
 
 use constellation_standalone::StandaloneApp;
 
-use crate::cmdline::StandaloneCmdLine;
+use crate::cmdline::StandaloneCmdline;
 
 fn main() {
-    StandaloneCmdLine::main()
+    StandaloneCmdline::main()
 }

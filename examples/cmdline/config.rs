@@ -17,7 +17,11 @@
 // <https://www.gnu.org/licenses/>.
 
 use constellation_channels::config::ChannelRegistryChannelsConfig;
+use constellation_channels::config::ChannelRegistryConfig;
+use constellation_channels::config::CompoundFarChannelConfig;
 use constellation_channels::config::CompoundFarEndpoint;
+use constellation_channels::config::CompoundXfrmCreateParam;
+use constellation_channels::config::ThreadedFlowsParams;
 use constellation_channels::config::ThreadedNSNameCachesConfig;
 use constellation_client::config::MulticastClientConfig;
 use constellation_common::codec::DatagramCodec;
@@ -28,28 +32,50 @@ use constellation_streams::large_obj::LargeObjMsgCodec;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(
-    Clone, Debug, Default, Deserialize, PartialEq, PartialOrd, Serialize,
-)]
+pub type RegistryConfig = ChannelRegistryConfig<
+    CompoundFarChannelConfig,
+    ThreadedFlowsParams,
+    CompoundXfrmCreateParam<(), ()>
+>;
+
+#[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
 #[serde(rename = "example")]
 #[serde(rename_all = "kebab-case")]
 pub struct CmdlineConfig {
     /// Name cache configuration.
     #[serde(default)]
     name_caches: ThreadedNSNameCachesConfig,
+    /// Channel registry configuration.
+    #[serde(flatten)]
+    registry: RegistryConfig,
     #[serde(flatten)]
     multicast: MulticastClientConfig<
-            String,
+        String,
         ChannelRegistryChannelsConfig<
             <LargeObjMsgCodec as DatagramCodec<LargeObjMsg>>::Param
         >,
         <AscendingCount as IDGen>::Config,
         CompoundFarEndpoint
-    >
+    >,
+    #[serde(default)]
+    session: ()
 }
 
 impl CmdlineConfig {
-    pub fn take(self) -> ThreadedNSNameCachesConfig {
-        self.name_caches
+    pub fn take(
+        self
+    ) -> (ThreadedNSNameCachesConfig,
+          RegistryConfig,
+          MulticastClientConfig<
+              String,
+              ChannelRegistryChannelsConfig<
+                      <LargeObjMsgCodec as DatagramCodec<LargeObjMsg>>::Param
+                      >,
+              <AscendingCount as IDGen>::Config,
+              CompoundFarEndpoint
+          >,
+          ())
+    {
+        (self.name_caches, self.registry, self.multicast, self.session)
     }
 }
