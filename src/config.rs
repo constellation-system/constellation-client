@@ -38,36 +38,27 @@ where
 #[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
 #[serde(rename = "unicast-client")]
 #[serde(rename_all = "kebab-case")]
-pub struct UnicastClientConfig<Session, Channels, Epochs, Endpoint>
+pub struct UnicastClientConfig<Channels, Epochs, Endpoint>
 where
     Channels: Default,
     Epochs: Default {
     #[serde(flatten)]
-    session: Session,
-    #[serde(flatten)]
     unicast: UnicastCommConfig<Channels, Epochs, Endpoint>
 }
 
-impl<Session, Channels, Epochs, Endpoint>
-    UnicastClientConfig<Session, Channels, Epochs, Endpoint>
+impl<Channels, Epochs, Endpoint>
+    UnicastClientConfig<Channels, Epochs, Endpoint>
 where
     Channels: Default,
     Epochs: Default
 {
     #[inline]
     pub fn new(
-        session: Session,
         unicast: UnicastCommConfig<Channels, Epochs, Endpoint>
     ) -> Self {
         UnicastClientConfig {
             unicast: unicast,
-            session: session
         }
-    }
-
-    #[inline]
-    pub fn session(&self) -> &Session {
-        &self.session
     }
 
     #[inline]
@@ -78,8 +69,8 @@ where
     #[inline]
     pub fn take(
         self
-    ) -> (Session, UnicastCommConfig<Channels, Epochs, Endpoint>) {
-        (self.session, self.unicast)
+    ) -> UnicastCommConfig<Channels, Epochs, Endpoint> {
+        self.unicast
     }
 }
 

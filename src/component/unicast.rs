@@ -23,10 +23,9 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use constellation_auth::authn::SessionAuthN;
-use constellation_auth::authn::TestAuthN;
+use constellation_auth::authn::TrivialAuthN;
 use constellation_auth::cred::SSLCred;
 use constellation_channels::config::ChannelRegistryChannelsConfig;
 use constellation_channels::config::CompoundFarEndpoint;
@@ -61,7 +60,6 @@ use constellation_common::net::DatagramXfrm;
 use constellation_common::net::DatagramXfrmCreate;
 use constellation_common::net::IPEndpointAddr;
 use constellation_common::net::Socket;
-use constellation_common::sched::DenseItemID;
 use constellation_common::shutdown::ShutdownFlag;
 use constellation_component_common::comm::unicast::UnicastComm;
 use constellation_component_common::comm::unicast::UnicastCommCleanup;
@@ -69,7 +67,6 @@ use constellation_component_common::comm::unicast::UnicastCommCreateError;
 use constellation_streams::addrs::Addrs;
 use constellation_streams::addrs::AddrsCreate;
 use constellation_streams::channels::ChannelParam;
-use constellation_streams::error::ErrorReportInfo;
 use constellation_streams::select::StreamSelectorCreateError;
 use constellation_streams::select::ThreadedStreamSelectorError;
 use constellation_streams::stream::ConcurrentStream;
@@ -88,12 +85,12 @@ pub type CompoundUnicastClientComponent<Ctx, Session, Epochs, MsgCodec> =
         Epochs,
         CompoundFarChannel,
         CompoundFarChannelThreadedFlows<
-            Arc<TestAuthN<String, TestCred>>,
+            TrivialAuthN<TestCred>,
             UnixDatagramXfrm,
             UDPDatagramXfrm,
             FarChannelRegistryID
         >,
-        Arc<TestAuthN<String, TestCred>>,
+        TrivialAuthN<TestCred>,
         CompoundFarChannelXfrm<UnixDatagramXfrm, UDPDatagramXfrm>,
         Ctx,
         MixedResolver<CompoundFarChannelXfrmPeerAddr, CompoundFarEndpoint>,
@@ -122,8 +119,6 @@ pub struct UnicastClientComponent<
     AuthN::Prin: 'static + Clone + Display + Eq + Hash + Send,
     MsgCodec: Clone + DatagramCodec<Session::Msg> + Send,
     <MsgCodec as DatagramCodec<Session::Msg>>::Param: Default,
-    <MsgCodec as DatagramCodec<Session::Msg>>::EncodeError:
-        ErrorReportInfo<DenseItemID<usize>>,
     Channel:
         FarChannelOwnedFlows<F, AuthN, Xfrm> + FarChannelCreate + Send + Sync,
     Channel::Acquired: FarChannelAcquiredResolve<Resolved = Channel::Param>,
@@ -176,11 +171,11 @@ pub struct UnicastClientComponent<
     resolver: PhantomData<Resolver>,
     session: PhantomData<Session>,
     config: UnicastClientConfig<
-        Session::Config,
         ChannelRegistryChannelsConfig<MsgCodec::Param>,
         Epochs::Config,
         Endpoint
     >,
+    session_config: Session::Config,
     listener: ThreadedFlowsListener<
         <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
         StreamID<
@@ -203,9 +198,10 @@ where
 }
 
 #[derive(Debug)]
-pub enum UnicastClientComponentRunError<Session, Unicast> {
+pub enum UnicastClientComponentRunError<Session, Unicast, Start> {
     Session { err: Session },
     Unicast { err: Unicast },
+    Start { err: Start },
     SkippedIdx
 }
 
@@ -247,8 +243,6 @@ where
     AuthN::Prin: 'static + Clone + Display + Eq + Hash + Send,
     MsgCodec: 'static + Clone + DatagramCodec<Session::Msg> + Send,
     <MsgCodec as DatagramCodec<Session::Msg>>::Param: Default,
-    <MsgCodec as DatagramCodec<Session::Msg>>::EncodeError:
-        ErrorReportInfo<DenseItemID<usize>>,
     Channel: 'static
         + FarChannelOwnedFlows<F, AuthN, Xfrm>
         + FarChannelCreate
@@ -303,6 +297,39 @@ where
         + Send
         + Sync
 {
+    pub fn create(
+        config: UnicastClientConfig<
+            ChannelRegistryChannelsConfig<MsgCodec::Param>,
+            Epochs::Config,
+            Endpoint
+        >,
+        session_config: Session::Config,
+        listener: ThreadedFlowsListener<
+            <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
+            StreamID<
+                <Channel::Xfrm as DatagramXfrm>::PeerAddr,
+                F::ChannelID,
+                Channel::Param
+            >,
+            AuthN::Prin
+        >,
+        shutdown: ShutdownFlag,
+        ctx: Ctx
+    ) -> Self {
+        UnicastClientComponent {
+            channel: PhantomData,
+            flow: PhantomData,
+            xfrm: PhantomData,
+            resolver: PhantomData,
+            session: PhantomData,
+            config: config,
+            session_config: session_config,
+            listener: listener,
+            shutdown: shutdown,
+            ctx: ctx
+        }
+    }
+
     pub fn start(
         self
     ) -> Result<
@@ -342,11 +369,13 @@ where
                         >
                     >
                 >
-            >
+            >,
+            Session::StartError,
         >
     >{
         let UnicastClientComponent {
             config,
+            session_config,
             listener,
             ctx,
             shutdown,
@@ -356,7 +385,7 @@ where
         info!(target: "unicast-client-component",
               "starting unicast client component");
 
-        let (session_config, unicast_config) = config.take();
+        let unicast_config = config.take();
         let (session, msgs, notify, recv) = Session::create(session_config)
             .map_err(|err| UnicastClientComponentRunError::Session {
                 err: err
@@ -384,7 +413,10 @@ where
             msgs.clone()
         )
         .map_err(|err| UnicastClientComponentRunError::Unicast { err: err })?;
-        let session_cleanup = session.start();
+        let session_cleanup = session.start()
+            .map_err(|err| UnicastClientComponentRunError::Start {
+                err: err
+            })?;
 
         debug!(target: "unicast-client-component",
                "starting unicaster");
@@ -416,11 +448,12 @@ where
     }
 }
 
-impl<Session, Unicast> Display
-    for UnicastClientComponentRunError<Session, Unicast>
+impl<Session, Unicast, Start> Display
+    for UnicastClientComponentRunError<Session, Unicast, Start>
 where
     Session: Display,
-    Unicast: Display
+    Unicast: Display,
+    Start: Display
 {
     fn fmt(
         &self,
@@ -429,6 +462,7 @@ where
         match self {
             UnicastClientComponentRunError::Session { err } => err.fmt(f),
             UnicastClientComponentRunError::Unicast { err } => err.fmt(f),
+            UnicastClientComponentRunError::Start { err } => err.fmt(f),
             UnicastClientComponentRunError::SkippedIdx => {
                 write!(f, "stream parties skipped an index")
             }

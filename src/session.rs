@@ -47,6 +47,7 @@ pub trait MulticastClientSession<Prin>: Sized {
 pub trait UnicastClientSession<Prin>: Sized {
     type Config;
     type CreateError: Display;
+    type StartError: Display;
     type Msg: Clone + Send;
     type Msgs: Clone + PrivateMsgs<Self::Msg> + Send;
     type Recv: Clone + AuthNMsgRecv<Prin, Self::Msg> + Send;
@@ -56,7 +57,7 @@ pub trait UnicastClientSession<Prin>: Sized {
         config: Self::Config
     ) -> Result<(Self, Self::Msgs, Notify, Self::Recv), Self::CreateError>;
 
-    fn start(self) -> Self::Cleanup;
+    fn start(self) -> Result<Self::Cleanup, Self::StartError>;
 }
 
 pub trait ClientSessionCleanup {
