@@ -60,6 +60,7 @@ use constellation_streams::large_obj::LargeObjMsgCodec;
 use log::debug;
 use log::error;
 use log::info;
+use log::trace;
 
 use crate::config::ProcessorConfig;
 
@@ -153,6 +154,9 @@ impl PrivateMsgs<LargeObjMsg> for ProcessorSessionMsgs {
         let when = now + Duration::from_secs(1);
         let msg = LargeObjMsg::Finish { id: 0x0123456789abcdef };
 
+        trace!(target: "processor-msgs",
+               "gathering messages");
+
         Ok((Some(vec![msg]), Some(when)))
     }
 }
@@ -165,7 +169,7 @@ impl AuthNMsgRecv<TestCred, LargeObjMsg> for ProcessorSessionRecv {
         prin: &TestCred,
         msg: LargeObjMsg
     ) -> Result<(), Self::RecvError> {
-        info!(target: "cmdline-recv",
+        info!(target: "processor-recv",
               "received message from {}: {:?}",
               prin, msg);
 
@@ -258,7 +262,7 @@ impl Standalone for StandaloneProcessor {
                 Ok((standalone, cleanup))
             }
             Err(err) => {
-                error!(target: "start",
+                error!(target: "processor-start",
                        "error creating channel registry: {}",
                        err);
 
@@ -276,7 +280,7 @@ impl StandaloneService for StandaloneProcessor {
         match self.component.start() {
             Ok(out) => Ok(out),
             Err(err) => {
-                error!(target: "example",
+                error!(target: "processor",
                        "{}", err);
 
                 Err(())
@@ -288,23 +292,23 @@ impl StandaloneService for StandaloneProcessor {
         mut create_cleanup: Self::CreateCleanup,
         run_cleanup: Option<Self::RunCleanup>
     ) {
-        debug!(target: "example",
+        debug!(target: "processor",
                "cleaning up consensus");
 
         create_cleanup.shutdown.set();
 
         if let Some(cleanup) = run_cleanup {
-            debug!(target: "example",
+            debug!(target: "processor",
                "cleaning up runtime");
 
             cleanup.cleanup();
         }
 
-        debug!(target: "example",
+        debug!(target: "processor",
                "cleaning up caches");
 
         if create_cleanup.caches_join.join().is_err() {
-            error!(target: "example",
+            error!(target: "processor",
                    "error shutting down name chache threads")
         }
     }
@@ -319,7 +323,7 @@ impl StandaloneService for StandaloneProcessor {
         } = create;
 
         if let Err(_) = caches_join.join() {
-            error!(target: "example",
+            error!(target: "processor",
                    "error joining caches");
 
         }
