@@ -15,9 +15,14 @@
 // You should have received a copy of the GNU Affero General Public
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
-#![allow(clippy::redundant_field_names)]
-#![allow(clippy::type_complexity)]
 
-pub mod component;
-pub mod config;
-pub mod session;
+mod cmdline;
+mod config;
+
+use constellation_standalone::StandaloneApp;
+
+use crate::cmdline::StandaloneCmdline;
+
+fn main() {
+    StandaloneCmdline::main()
+}
