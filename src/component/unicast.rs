@@ -413,10 +413,9 @@ where
             msgs.clone()
         )
         .map_err(|err| UnicastClientComponentRunError::Unicast { err: err })?;
-        let session_cleanup = session.start()
-            .map_err(|err| UnicastClientComponentRunError::Start {
-                err: err
-            })?;
+        let session_cleanup = session.start().map_err(|err| {
+            UnicastClientComponentRunError::Start { err: err }
+        })?;
 
         debug!(target: "unicast-client-component",
                "starting unicaster");

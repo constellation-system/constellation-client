@@ -115,7 +115,6 @@ pub struct StandaloneCmdline {
     >
 }
 
-
 impl NSNameCachesCtx for StandaloneCtx {
     /// Exact type of name caches.
     type NameCaches = ThreadedNSNameCaches;
@@ -156,13 +155,18 @@ impl SharedMsgs<PartyStreamIdx, LargeObjMsg> for CmdlineSessionMsgs {
     fn msgs(
         &mut self
     ) -> Result<
-        (Option<Vec<(Vec<PartyStreamIdx>, Vec<LargeObjMsg>)>>, Option<Instant>),
+        (
+            Option<Vec<(Vec<PartyStreamIdx>, Vec<LargeObjMsg>)>>,
+            Option<Instant>
+        ),
         Self::MsgsError
     > {
         let guard = self.parties.read().map_err(|_| MutexPoison)?;
         let now = Instant::now();
         let when = now + Duration::from_secs(1);
-        let msg = LargeObjMsg::Finish { id: 0x0123456789abcdef };
+        let msg = LargeObjMsg::Finish {
+            id: 0x0123456789abcdef
+        };
 
         Ok((Some(vec![(guard.clone(), vec![msg])]), Some(when)))
     }
@@ -185,27 +189,26 @@ impl AuthNMsgRecv<String, LargeObjMsg> for CmdlineSessionRecv {
 }
 
 impl MulticastClientSession<String> for CmdlineSession {
+    type Cleanup = CmdlineSessionCleanup;
     type Config = ();
     type CreateError = Infallible;
-    type StartError = MutexPoison;
     type Msg = LargeObjMsg;
     type Msgs = CmdlineSessionMsgs;
     type Recv = CmdlineSessionRecv;
-    type Cleanup = CmdlineSessionCleanup;
+    type StartError = MutexPoison;
 
     fn create(
-        _config: Self::Config,
+        _config: Self::Config
     ) -> Result<(Self, Self::Msgs, Notify, Self::Recv), Self::CreateError> {
         let parties = Arc::new(RwLock::new(Vec::new()));
 
-        Ok((CmdlineSession {
-            parties: parties.clone()
-        },
-         CmdlineSessionMsgs {
-             parties: parties
-         },
-         Notify::new(),
-         CmdlineSessionRecv
+        Ok((
+            CmdlineSession {
+                parties: parties.clone()
+            },
+            CmdlineSessionMsgs { parties: parties },
+            Notify::new(),
+            CmdlineSessionRecv
         ))
     }
 
@@ -213,9 +216,9 @@ impl MulticastClientSession<String> for CmdlineSession {
         self,
         parties: I
     ) -> Result<Self::Cleanup, Self::StartError>
-    where I: Iterator<Item = (PartyStreamIdx, String)>{
-        let mut guard = self.parties.write()
-            .map_err(|_| MutexPoison)?;
+    where
+        I: Iterator<Item = (PartyStreamIdx, String)> {
+        let mut guard = self.parties.write().map_err(|_| MutexPoison)?;
 
         *guard = parties.map(|(idx, _)| idx).collect();
 
@@ -224,8 +227,7 @@ impl MulticastClientSession<String> for CmdlineSession {
 }
 
 impl ClientSessionCleanup for CmdlineSessionCleanup {
-    fn cleanup(self) {
-    }
+    fn cleanup(self) {}
 }
 
 impl Standalone for StandaloneCmdline {
@@ -244,8 +246,12 @@ impl Standalone for StandaloneCmdline {
         _args: ArgMatches,
         config: Self::Config
     ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
-        let (name_caches_config, registry_config,
-             client_config, session_config) = config.take();
+        let (
+            name_caches_config,
+            registry_config,
+            client_config,
+            session_config
+        ) = config.take();
         let shutdown = ShutdownFlag::new();
         let (mut caches, caches_join) =
             ThreadedNSNameCaches::create(name_caches_config, shutdown.clone());
@@ -336,7 +342,6 @@ impl Standalone for StandaloneCmdline {
                     component: component
                 };
 
-
                 Ok((standalone, cleanup))
             }
             Err(err) => {
@@ -360,14 +365,13 @@ impl StandaloneApp for StandaloneCmdline {
         info!(target: "example",
               "starting example");
 
-        let cleanup = self.component.start()
-            .map_err(|err| {
-                error!(target: "example",
+        let cleanup = self.component.start().map_err(|err| {
+            error!(target: "example",
                        "error starting comonent: {}",
                        err);
 
-                ()
-            })?;
+            ()
+        })?;
 
         cleanup.cleanup();
 
@@ -380,21 +384,16 @@ impl StandaloneApp for StandaloneCmdline {
         create: Self::CreateCleanup,
         _run: Self::RunErrorCleanup
     ) {
-        let StandaloneCreateCleanup {
-            caches_join,
-            ..
-        } = create;
+        let StandaloneCreateCleanup { caches_join, .. } = create;
 
         if let Err(_) = caches_join.join() {
             error!(target: "example",
                    "error joining caches");
-
         }
     }
 }
 
-impl Display for CmdlineSessionError
-{
+impl Display for CmdlineSessionError {
     fn fmt(
         &self,
         f: &mut Formatter<'_>

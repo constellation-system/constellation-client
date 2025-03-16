@@ -63,17 +63,23 @@ pub struct ProcessorConfig {
 impl ProcessorConfig {
     pub fn take(
         self
-    ) -> (ThreadedNSNameCachesConfig,
-          RegistryConfig,
-          UnicastClientConfig<
-              ChannelRegistryChannelsConfig<
-                      <LargeObjMsgCodec as DatagramCodec<LargeObjMsg>>::Param
-                      >,
-              <AscendingCount as IDGen>::Config,
-              CompoundFarEndpoint
-          >,
-          ())
-    {
-        (self.name_caches, self.registry, self.multicast, self.session)
+    ) -> (
+        ThreadedNSNameCachesConfig,
+        RegistryConfig,
+        UnicastClientConfig<
+            ChannelRegistryChannelsConfig<
+                <LargeObjMsgCodec as DatagramCodec<LargeObjMsg>>::Param
+            >,
+            <AscendingCount as IDGen>::Config,
+            CompoundFarEndpoint
+        >,
+        ()
+    ) {
+        (
+            self.name_caches,
+            self.registry,
+            self.multicast,
+            self.session
+        )
     }
 }

@@ -16,8 +16,8 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
-mod processor;
 mod config;
+mod processor;
 
 use constellation_standalone::StandaloneService;
 

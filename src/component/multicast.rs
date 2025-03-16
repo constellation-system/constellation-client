@@ -419,13 +419,10 @@ where
         .map_err(|err| {
             MulticastClientComponentRunError::Multicast { err: err }
         })?;
-        let parties = match multicast.parties() {
-            Ok(parties) => parties
-        };
-        let session_cleanup = session.start(parties)
-            .map_err(|err| MulticastClientComponentRunError::Start {
-                err: err
-            })?;
+        let Ok(parties) = multicast.parties();
+        let session_cleanup = session.start(parties).map_err(|err| {
+            MulticastClientComponentRunError::Start { err: err }
+        })?;
 
         debug!(target: "multicast-client-component",
                "starting multicaster");
@@ -451,7 +448,7 @@ where
             session
         } = self;
 
-//        shutdown.set();
+        //        shutdown.set();
         multicast.cleanup();
         session.cleanup();
     }
@@ -462,7 +459,7 @@ impl<Session, Multicast, Start> Display
 where
     Session: Display,
     Multicast: Display,
-    Start: Display,
+    Start: Display
 {
     fn fmt(
         &self,

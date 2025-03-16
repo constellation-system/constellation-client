@@ -40,9 +40,9 @@ use constellation_channels::far::unix::UnixDatagramXfrm;
 use constellation_channels::resolve::cache::NSNameCachesCtx;
 use constellation_channels::resolve::cache::ThreadedNSNameCaches;
 use constellation_client::component::unicast::CompoundUnicastClientComponent;
+use constellation_client::component::unicast::TestCred;
 use constellation_client::component::unicast::UnicastClientComponent;
 use constellation_client::component::unicast::UnicastClientComponentCleanup;
-use constellation_client::component::unicast::TestCred;
 use constellation_client::session::ClientSessionCleanup;
 use constellation_client::session::UnicastClientSession;
 use constellation_common::error::MutexPoison;
@@ -74,7 +74,8 @@ pub struct ProcessorSessionRecv;
 
 pub struct ProcessorSessionCleanup;
 
-pub type ProcessorCleanup = UnicastClientComponentCleanup<ProcessorSessionCleanup>;
+pub type ProcessorCleanup =
+    UnicastClientComponentCleanup<ProcessorSessionCleanup>;
 
 pub enum ProcessorSessionError {
     SkippedIdx
@@ -105,7 +106,6 @@ pub struct StandaloneProcessor {
         LargeObjMsgCodec
     >
 }
-
 
 impl NSNameCachesCtx for StandaloneCtx {
     /// Exact type of name caches.
@@ -146,13 +146,13 @@ impl PrivateMsgs<LargeObjMsg> for ProcessorSessionMsgs {
     /// well as the time at which to check again for new messages.
     fn msgs(
         &mut self
-    ) -> Result<
-        (Option<Vec<LargeObjMsg>>, Option<Instant>),
-        Self::MsgsError
-    > {
+    ) -> Result<(Option<Vec<LargeObjMsg>>, Option<Instant>), Self::MsgsError>
+    {
         let now = Instant::now();
         let when = now + Duration::from_secs(1);
-        let msg = LargeObjMsg::Finish { id: 0x0123456789abcdef };
+        let msg = LargeObjMsg::Finish {
+            id: 0x0123456789abcdef
+        };
 
         trace!(target: "processor-msgs",
                "gathering messages");
@@ -178,34 +178,32 @@ impl AuthNMsgRecv<TestCred, LargeObjMsg> for ProcessorSessionRecv {
 }
 
 impl UnicastClientSession<TestCred> for ProcessorSession {
+    type Cleanup = ProcessorSessionCleanup;
     type Config = ();
     type CreateError = Infallible;
-    type StartError = MutexPoison;
     type Msg = LargeObjMsg;
     type Msgs = ProcessorSessionMsgs;
     type Recv = ProcessorSessionRecv;
-    type Cleanup = ProcessorSessionCleanup;
+    type StartError = MutexPoison;
 
     fn create(
-        _config: Self::Config,
+        _config: Self::Config
     ) -> Result<(Self, Self::Msgs, Notify, Self::Recv), Self::CreateError> {
-        Ok((ProcessorSession,
+        Ok((
+            ProcessorSession,
             ProcessorSessionMsgs,
             Notify::new(),
             ProcessorSessionRecv
         ))
     }
 
-    fn start(
-        self,
-    ) -> Result<Self::Cleanup, Self::StartError> {
+    fn start(self) -> Result<Self::Cleanup, Self::StartError> {
         Ok(ProcessorSessionCleanup)
     }
 }
 
 impl ClientSessionCleanup for ProcessorSessionCleanup {
-    fn cleanup(self) {
-    }
+    fn cleanup(self) {}
 }
 
 impl Standalone for StandaloneProcessor {
@@ -224,8 +222,12 @@ impl Standalone for StandaloneProcessor {
         _args: ArgMatches,
         config: Self::Config
     ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
-        let (name_caches_config, registry_config,
-             client_config, session_config) = config.take();
+        let (
+            name_caches_config,
+            registry_config,
+            client_config,
+            session_config
+        ) = config.take();
         let shutdown = ShutdownFlag::new();
         let (mut caches, caches_join) =
             ThreadedNSNameCaches::create(name_caches_config, shutdown.clone());
@@ -257,7 +259,6 @@ impl Standalone for StandaloneProcessor {
                 let standalone = StandaloneProcessor {
                     component: component
                 };
-
 
                 Ok((standalone, cleanup))
             }
@@ -317,21 +318,16 @@ impl StandaloneService for StandaloneProcessor {
         create: Self::CreateCleanup,
         _run: Self::RunErrorCleanup
     ) {
-        let StandaloneCreateCleanup {
-            caches_join,
-            ..
-        } = create;
+        let StandaloneCreateCleanup { caches_join, .. } = create;
 
         if let Err(_) = caches_join.join() {
             error!(target: "processor",
                    "error joining caches");
-
         }
     }
 }
 
-impl Display for ProcessorSessionError
-{
+impl Display for ProcessorSessionError {
     fn fmt(
         &self,
         f: &mut Formatter<'_>

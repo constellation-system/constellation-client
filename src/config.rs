@@ -46,19 +46,14 @@ where
     unicast: UnicastCommConfig<Channels, Epochs, Endpoint>
 }
 
-impl<Channels, Epochs, Endpoint>
-    UnicastClientConfig<Channels, Epochs, Endpoint>
+impl<Channels, Epochs, Endpoint> UnicastClientConfig<Channels, Epochs, Endpoint>
 where
     Channels: Default,
     Epochs: Default
 {
     #[inline]
-    pub fn new(
-        unicast: UnicastCommConfig<Channels, Epochs, Endpoint>
-    ) -> Self {
-        UnicastClientConfig {
-            unicast: unicast,
-        }
+    pub fn new(unicast: UnicastCommConfig<Channels, Epochs, Endpoint>) -> Self {
+        UnicastClientConfig { unicast: unicast }
     }
 
     #[inline]
@@ -67,9 +62,7 @@ where
     }
 
     #[inline]
-    pub fn take(
-        self
-    ) -> UnicastCommConfig<Channels, Epochs, Endpoint> {
+    pub fn take(self) -> UnicastCommConfig<Channels, Epochs, Endpoint> {
         self.unicast
     }
 }
@@ -87,7 +80,7 @@ where
     ) -> Self {
         MulticastClientConfig {
             self_party: self_party,
-            multicast: multicast,
+            multicast: multicast
         }
     }
 

@@ -41,7 +41,8 @@ pub trait MulticastClientSession<Prin>: Sized {
         self,
         parties: I
     ) -> Result<Self::Cleanup, Self::StartError>
-    where I: Iterator<Item = (PartyStreamIdx, Prin)>;
+    where
+        I: Iterator<Item = (PartyStreamIdx, Prin)>;
 }
 
 pub trait UnicastClientSession<Prin>: Sized {

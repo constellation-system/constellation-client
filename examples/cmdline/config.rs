@@ -64,18 +64,24 @@ pub struct CmdlineConfig {
 impl CmdlineConfig {
     pub fn take(
         self
-    ) -> (ThreadedNSNameCachesConfig,
-          RegistryConfig,
-          MulticastClientConfig<
-              String,
-              ChannelRegistryChannelsConfig<
-                      <LargeObjMsgCodec as DatagramCodec<LargeObjMsg>>::Param
-                      >,
-              <AscendingCount as IDGen>::Config,
-              CompoundFarEndpoint
-          >,
-          ())
-    {
-        (self.name_caches, self.registry, self.multicast, self.session)
+    ) -> (
+        ThreadedNSNameCachesConfig,
+        RegistryConfig,
+        MulticastClientConfig<
+            String,
+            ChannelRegistryChannelsConfig<
+                <LargeObjMsgCodec as DatagramCodec<LargeObjMsg>>::Param
+            >,
+            <AscendingCount as IDGen>::Config,
+            CompoundFarEndpoint
+        >,
+        ()
+    ) {
+        (
+            self.name_caches,
+            self.registry,
+            self.multicast,
+            self.session
+        )
     }
 }
