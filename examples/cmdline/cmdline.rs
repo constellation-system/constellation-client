@@ -50,6 +50,8 @@ use constellation_client::component::multicast::TestCred;
 use constellation_client::session::ClientSessionCleanup;
 use constellation_client::session::MulticastClientSession;
 use constellation_common::error::MutexPoison;
+use constellation_common::hashid::SHA3Algo;
+use constellation_common::hashid::SHA3ID;
 use constellation_common::ids::AscendingCount;
 use constellation_common::net::IPEndpointAddr;
 use constellation_common::net::SharedMsgs;
@@ -62,7 +64,6 @@ use constellation_component_common::config::PartiesConfig;
 use constellation_component_common::PartyStreamIdx;
 use constellation_standalone::Standalone;
 use constellation_standalone::StandaloneApp;
-use constellation_streams::large_obj::LargeObjFrag;
 use constellation_streams::large_obj::LargeObjMsg;
 use constellation_streams::large_obj::LargeObjMsgCodec;
 use log::error;
@@ -111,7 +112,7 @@ pub struct StandaloneCmdline {
         StandaloneCtx,
         CmdlineSession,
         AscendingCount,
-        LargeObjMsgCodec
+        LargeObjMsgCodec<SHA3Algo>
     >
 }
 
@@ -144,7 +145,7 @@ impl
     }
 }
 
-impl SharedMsgs<PartyStreamIdx, LargeObjMsg> for CmdlineSessionMsgs {
+impl SharedMsgs<PartyStreamIdx, LargeObjMsg<SHA3ID>> for CmdlineSessionMsgs {
     /// Type of errors that can occur when collecting messages.
     type MsgsError = MutexPoison;
 
@@ -156,7 +157,7 @@ impl SharedMsgs<PartyStreamIdx, LargeObjMsg> for CmdlineSessionMsgs {
         &mut self
     ) -> Result<
         (
-            Option<Vec<(Vec<PartyStreamIdx>, Vec<LargeObjMsg>)>>,
+            Option<Vec<(Vec<PartyStreamIdx>, Vec<LargeObjMsg<SHA3ID>>)>>,
             Option<Instant>
         ),
         Self::MsgsError
@@ -172,13 +173,13 @@ impl SharedMsgs<PartyStreamIdx, LargeObjMsg> for CmdlineSessionMsgs {
     }
 }
 
-impl AuthNMsgRecv<String, LargeObjMsg> for CmdlineSessionRecv {
+impl AuthNMsgRecv<String, LargeObjMsg<SHA3ID>> for CmdlineSessionRecv {
     type RecvError = Infallible;
 
     fn recv_auth_msg(
         &mut self,
         prin: &String,
-        msg: LargeObjMsg
+        msg: LargeObjMsg<SHA3ID>
     ) -> Result<(), Self::RecvError> {
         info!(target: "cmdline-recv",
               "received message from {}: {:?}",
@@ -192,7 +193,7 @@ impl MulticastClientSession<String> for CmdlineSession {
     type Cleanup = CmdlineSessionCleanup;
     type Config = ();
     type CreateError = Infallible;
-    type Msg = LargeObjMsg;
+    type Msg = LargeObjMsg<SHA3ID>;
     type Msgs = CmdlineSessionMsgs;
     type Recv = CmdlineSessionRecv;
     type StartError = MutexPoison;

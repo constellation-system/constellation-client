@@ -16,8 +16,8 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
-use constellation_component_common::config::MulticastCommConfig;
-use constellation_component_common::config::UnicastCommConfig;
+use constellation_component_common::config::MulticastDatagramBusConfig;
+use constellation_component_common::config::UnicastDatagramBusConfig;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -32,7 +32,7 @@ where
     #[serde(rename = "self")]
     self_party: PartyID,
     #[serde(flatten)]
-    multicast: MulticastCommConfig<PartyID, Channels, Epochs, Endpoint>
+    multicast: MulticastDatagramBusConfig<PartyID, Channels, Epochs, Endpoint>
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
@@ -43,7 +43,7 @@ where
     Channels: Default,
     Epochs: Default {
     #[serde(flatten)]
-    unicast: UnicastCommConfig<Channels, Epochs, Endpoint>
+    unicast: UnicastDatagramBusConfig<Channels, Epochs, Endpoint>
 }
 
 impl<Channels, Epochs, Endpoint> UnicastClientConfig<Channels, Epochs, Endpoint>
@@ -52,17 +52,17 @@ where
     Epochs: Default
 {
     #[inline]
-    pub fn new(unicast: UnicastCommConfig<Channels, Epochs, Endpoint>) -> Self {
+    pub fn new(unicast: UnicastDatagramBusConfig<Channels, Epochs, Endpoint>) -> Self {
         UnicastClientConfig { unicast: unicast }
     }
 
     #[inline]
-    pub fn unicast(&self) -> &UnicastCommConfig<Channels, Epochs, Endpoint> {
+    pub fn unicast(&self) -> &UnicastDatagramBusConfig<Channels, Epochs, Endpoint> {
         &self.unicast
     }
 
     #[inline]
-    pub fn take(self) -> UnicastCommConfig<Channels, Epochs, Endpoint> {
+    pub fn take(self) -> UnicastDatagramBusConfig<Channels, Epochs, Endpoint> {
         self.unicast
     }
 }
@@ -76,7 +76,7 @@ where
     #[inline]
     pub fn new(
         self_party: PartyID,
-        multicast: MulticastCommConfig<PartyID, Channels, Epochs, Endpoint>
+        multicast: MulticastDatagramBusConfig<PartyID, Channels, Epochs, Endpoint>
     ) -> Self {
         MulticastClientConfig {
             self_party: self_party,
@@ -92,7 +92,7 @@ where
     #[inline]
     pub fn multicast(
         &self
-    ) -> &MulticastCommConfig<PartyID, Channels, Epochs, Endpoint> {
+    ) -> &MulticastDatagramBusConfig<PartyID, Channels, Epochs, Endpoint> {
         &self.multicast
     }
 
@@ -101,7 +101,7 @@ where
         self
     ) -> (
         PartyID,
-        MulticastCommConfig<PartyID, Channels, Epochs, Endpoint>
+        MulticastDatagramBusConfig<PartyID, Channels, Epochs, Endpoint>
     ) {
         (self.self_party, self.multicast)
     }

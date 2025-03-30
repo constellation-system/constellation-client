@@ -25,6 +25,8 @@ use constellation_channels::config::ThreadedFlowsParams;
 use constellation_channels::config::ThreadedNSNameCachesConfig;
 use constellation_client::config::UnicastClientConfig;
 use constellation_common::codec::DatagramCodec;
+use constellation_common::hashid::SHA3Algo;
+use constellation_common::hashid::SHA3ID;
 use constellation_common::ids::AscendingCount;
 use constellation_common::ids::IDGen;
 use constellation_streams::large_obj::LargeObjMsg;
@@ -51,7 +53,7 @@ pub struct ProcessorConfig {
     #[serde(flatten)]
     multicast: UnicastClientConfig<
         ChannelRegistryChannelsConfig<
-            <LargeObjMsgCodec as DatagramCodec<LargeObjMsg>>::Param
+            <LargeObjMsgCodec<SHA3Algo> as DatagramCodec<LargeObjMsg<SHA3ID>>>::Param
         >,
         <AscendingCount as IDGen>::Config,
         CompoundFarEndpoint
@@ -68,7 +70,7 @@ impl ProcessorConfig {
         RegistryConfig,
         UnicastClientConfig<
             ChannelRegistryChannelsConfig<
-                <LargeObjMsgCodec as DatagramCodec<LargeObjMsg>>::Param
+                <LargeObjMsgCodec<SHA3Algo> as DatagramCodec<LargeObjMsg<SHA3ID>>>::Param
             >,
             <AscendingCount as IDGen>::Config,
             CompoundFarEndpoint

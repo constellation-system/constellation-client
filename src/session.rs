@@ -23,6 +23,7 @@ use constellation_common::net::PrivateMsgs;
 use constellation_common::net::SharedMsgs;
 use constellation_common::sync::Notify;
 use constellation_component_common::PartyStreamIdx;
+use constellation_streams::large_obj::LargeObjProto;
 
 pub trait MulticastClientSession<Prin>: Sized {
     type Config;

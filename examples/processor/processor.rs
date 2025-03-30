@@ -46,6 +46,8 @@ use constellation_client::component::unicast::UnicastClientComponentCleanup;
 use constellation_client::session::ClientSessionCleanup;
 use constellation_client::session::UnicastClientSession;
 use constellation_common::error::MutexPoison;
+use constellation_common::hashid::SHA3Algo;
+use constellation_common::hashid::SHA3ID;
 use constellation_common::ids::AscendingCount;
 use constellation_common::net::PrivateMsgs;
 use constellation_common::shutdown::ShutdownFlag;
@@ -103,7 +105,7 @@ pub struct StandaloneProcessor {
         StandaloneCtx,
         ProcessorSession,
         AscendingCount,
-        LargeObjMsgCodec
+        LargeObjMsgCodec<SHA3Algo>
     >
 }
 
@@ -136,7 +138,7 @@ impl
     }
 }
 
-impl PrivateMsgs<LargeObjMsg> for ProcessorSessionMsgs {
+impl PrivateMsgs<LargeObjMsg<SHA3ID>> for ProcessorSessionMsgs {
     /// Type of errors that can occur when collecting messages.
     type MsgsError = MutexPoison;
 
@@ -146,7 +148,7 @@ impl PrivateMsgs<LargeObjMsg> for ProcessorSessionMsgs {
     /// well as the time at which to check again for new messages.
     fn msgs(
         &mut self
-    ) -> Result<(Option<Vec<LargeObjMsg>>, Option<Instant>), Self::MsgsError>
+    ) -> Result<(Option<Vec<LargeObjMsg<SHA3ID>>>, Option<Instant>), Self::MsgsError>
     {
         let now = Instant::now();
         let when = now + Duration::from_secs(1);
@@ -161,13 +163,13 @@ impl PrivateMsgs<LargeObjMsg> for ProcessorSessionMsgs {
     }
 }
 
-impl AuthNMsgRecv<TestCred, LargeObjMsg> for ProcessorSessionRecv {
+impl AuthNMsgRecv<TestCred, LargeObjMsg<SHA3ID>> for ProcessorSessionRecv {
     type RecvError = Infallible;
 
     fn recv_auth_msg(
         &mut self,
         prin: &TestCred,
-        msg: LargeObjMsg
+        msg: LargeObjMsg<SHA3ID>
     ) -> Result<(), Self::RecvError> {
         info!(target: "processor-recv",
               "received message from {}: {:?}",
@@ -181,7 +183,7 @@ impl UnicastClientSession<TestCred> for ProcessorSession {
     type Cleanup = ProcessorSessionCleanup;
     type Config = ();
     type CreateError = Infallible;
-    type Msg = LargeObjMsg;
+    type Msg = LargeObjMsg<SHA3ID>;
     type Msgs = ProcessorSessionMsgs;
     type Recv = ProcessorSessionRecv;
     type StartError = MutexPoison;

@@ -61,9 +61,9 @@ use constellation_common::net::DatagramXfrmCreate;
 use constellation_common::net::IPEndpointAddr;
 use constellation_common::net::Socket;
 use constellation_common::shutdown::ShutdownFlag;
-use constellation_component_common::comm::unicast::UnicastComm;
-use constellation_component_common::comm::unicast::UnicastCommCleanup;
-use constellation_component_common::comm::unicast::UnicastCommCreateError;
+use constellation_component_common::bus::large_obj::unicast::UnicastLargeObjBus;
+use constellation_component_common::bus::large_obj::unicast::UnicastLargeObjBusCleanup;
+use constellation_component_common::bus::large_obj::unicast::UnicastLargeObjBusCreateError;
 use constellation_streams::addrs::Addrs;
 use constellation_streams::addrs::AddrsCreate;
 use constellation_streams::channels::ChannelParam;
@@ -193,7 +193,7 @@ pub struct UnicastClientComponentCleanup<Session>
 where
     Session: ClientSessionCleanup {
     shutdown: ShutdownFlag,
-    unicast: UnicastCommCleanup,
+    unicast: UnicastLargeObjBusCleanup,
     session: Session
 }
 
@@ -336,7 +336,7 @@ where
         UnicastClientComponentCleanup<Session::Cleanup>,
         UnicastClientComponentRunError<
             Session::CreateError,
-            UnicastCommCreateError<
+            UnicastLargeObjBusCreateError<
                 FarChannelRegistryAcquireError<
                     RegistryAcquireError<
                         Channel::AcquireError,
@@ -390,7 +390,7 @@ where
             .map_err(|err| UnicastClientComponentRunError::Session {
                 err: err
             })?;
-        let unicast: UnicastComm<
+        let unicast: UnicastLargeObjBus<
             _,
             MsgCodec,
             _,
@@ -403,7 +403,7 @@ where
             Resolver,
             _,
             _
-        > = UnicastComm::create(
+        > = UnicastLargeObjBus::create(
             unicast_config,
             listener,
             ctx,
