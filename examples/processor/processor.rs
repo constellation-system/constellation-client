@@ -148,8 +148,10 @@ impl PrivateMsgs<LargeObjMsg<SHA3ID>> for ProcessorSessionMsgs {
     /// well as the time at which to check again for new messages.
     fn msgs(
         &mut self
-    ) -> Result<(Option<Vec<LargeObjMsg<SHA3ID>>>, Option<Instant>), Self::MsgsError>
-    {
+    ) -> Result<
+        (Option<Vec<LargeObjMsg<SHA3ID>>>, Option<Instant>),
+        Self::MsgsError
+    > {
         let now = Instant::now();
         let when = now + Duration::from_secs(1);
         let msg = LargeObjMsg::Finish {

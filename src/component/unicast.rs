@@ -16,6 +16,7 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
+use std::convert::Infallible;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Error;
@@ -24,6 +25,8 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 
+use constellation_auth::authn::AuthNMsgRecv;
+use constellation_auth::authn::MsgAuthN;
 use constellation_auth::authn::SessionAuthN;
 use constellation_auth::authn::TrivialAuthN;
 use constellation_auth::cred::SSLCred;
@@ -55,6 +58,7 @@ use constellation_channels::resolve::cache::NSNameCachesCtx;
 use constellation_channels::resolve::MixedResolver;
 use constellation_channels::unix::UnixSocketAddr;
 use constellation_common::codec::DatagramCodec;
+use constellation_common::hashid::HashAlgo;
 use constellation_common::ids::IDGen;
 use constellation_common::net::DatagramXfrm;
 use constellation_common::net::DatagramXfrmCreate;
@@ -67,6 +71,9 @@ use constellation_component_common::bus::large_obj::unicast::UnicastLargeObjBusC
 use constellation_streams::addrs::Addrs;
 use constellation_streams::addrs::AddrsCreate;
 use constellation_streams::channels::ChannelParam;
+use constellation_streams::large_obj::LargeObjID;
+use constellation_streams::large_obj::LargeObjMsg;
+use constellation_streams::large_obj::LargeObjMsgCodec;
 use constellation_streams::select::StreamSelectorCreateError;
 use constellation_streams::select::ThreadedStreamSelectorError;
 use constellation_streams::stream::ConcurrentStream;
@@ -78,49 +85,90 @@ use crate::config::UnicastClientConfig;
 use crate::session::ClientSessionCleanup;
 use crate::session::UnicastClientSession;
 
-pub type CompoundUnicastClientComponent<Ctx, Session, Epochs, MsgCodec> =
-    UnicastClientComponent<
-        Session,
-        MsgCodec,
-        Epochs,
-        CompoundFarChannel,
-        CompoundFarChannelThreadedFlows<
-            TrivialAuthN<TestCred>,
-            UnixDatagramXfrm,
-            UDPDatagramXfrm,
-            FarChannelRegistryID
-        >,
+pub type CompoundUnicastClientComponent<
+    Msg,
+    Wrapper,
+    MsgAuth,
+    WrapperCodec,
+    H,
+    IDs,
+    Recv,
+    Session,
+    Epochs,
+    Ctx
+> = UnicastClientComponent<
+    Msg,
+    Wrapper,
+    MsgAuth,
+    WrapperCodec,
+    H,
+    IDs,
+    Recv,
+    Session,
+    Epochs,
+    CompoundFarChannel,
+    CompoundFarChannelThreadedFlows<
         TrivialAuthN<TestCred>,
-        CompoundFarChannelXfrm<UnixDatagramXfrm, UDPDatagramXfrm>,
-        Ctx,
-        MixedResolver<CompoundFarChannelXfrmPeerAddr, CompoundFarEndpoint>,
-        CompoundFarEndpoint
-    >;
+        UnixDatagramXfrm,
+        UDPDatagramXfrm,
+        FarChannelRegistryID
+    >,
+    TrivialAuthN<TestCred>,
+    CompoundFarChannelXfrm<UnixDatagramXfrm, UDPDatagramXfrm>,
+    Ctx,
+    MixedResolver<CompoundFarChannelXfrmPeerAddr, CompoundFarEndpoint>,
+    CompoundFarEndpoint
+>;
 
 pub struct UnicastClientComponent<
+    Msg,
+    Wrapper,
+    MsgAuth,
+    WrapperCodec,
+    H,
+    IDs,
+    Recv,
     Session,
-    MsgCodec,
     Epochs,
     Channel,
     F,
-    AuthN,
+    SessionAuth,
     Xfrm,
     Ctx,
     Resolver,
     Endpoint
 > where
-    Session: UnicastClientSession<AuthN::Prin>,
-    Epochs: 'static + IDGen + Iterator + Send,
+    Recv: Clone + AuthNMsgRecv<MsgAuth::Prin, Msg> + Send,
+    IDs: Clone + IDGen + Iterator<Item = LargeObjID> + Send,
+    MsgAuth:
+        Clone + MsgAuthN<Msg, Wrapper, SessionPrin = SessionAuth::Prin> + Send,
+    MsgAuth::SessionPrin: Send + Sync,
+    Msg: Clone + Send,
+    Wrapper: Clone + Send,
+    WrapperCodec: Clone + DatagramCodec<Wrapper> + Send,
+    <WrapperCodec as DatagramCodec<Wrapper>>::Param: Default,
+    H: Clone + Default + HashAlgo + Send,
+    H::HashID: Clone + Display + Hash + Eq + Send,
+    Session: UnicastClientSession<
+        H::HashID,
+        Msg,
+        Wrapper,
+        MsgAuth,
+        WrapperCodec,
+        IDs,
+        Recv
+    >,
+    Epochs: 'static + IDGen + Iterator + Send + Sync,
     Epochs::Item: Clone + Default + Display + Ord + Send,
-    AuthN: Clone
+    SessionAuth: Clone
         + SessionAuthN<<Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow>
         + Send
         + Sync,
-    AuthN::Prin: 'static + Clone + Display + Eq + Hash + Send,
-    MsgCodec: Clone + DatagramCodec<Session::Msg> + Send,
-    <MsgCodec as DatagramCodec<Session::Msg>>::Param: Default,
-    Channel:
-        FarChannelOwnedFlows<F, AuthN, Xfrm> + FarChannelCreate + Send + Sync,
+    SessionAuth::Prin: 'static + Clone + Display + Eq + Hash + Send + Sync,
+    Channel: FarChannelOwnedFlows<F, SessionAuth, Xfrm>
+        + FarChannelCreate
+        + Send
+        + Sync,
     Channel::Acquired: FarChannelAcquiredResolve<Resolved = Channel::Param>,
     Channel::Param: 'static
         + Clone
@@ -136,8 +184,12 @@ pub struct UnicastClientComponent<
     <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow:
         ConcurrentStream + Send,
     <Channel::Xfrm as DatagramXfrm>::PeerAddr: Eq + Hash + Send + Sync,
-    F: OwnedFlowsCreate<Channel::Socket, Channel::Nego, AuthN, Channel::Xfrm>
-        + Send,
+    F: OwnedFlowsCreate<
+            Channel::Socket,
+            Channel::Nego,
+            SessionAuth,
+            Channel::Xfrm
+        > + Send,
     F::Flow: 'static + ConcurrentStream + Send,
     F::CreateParam: Clone + Default + Send + Sync,
     F::Reporter: Clone + Send + Sync,
@@ -147,7 +199,7 @@ pub struct UnicastClientComponent<
     Xfrm::CreateParam: Clone + Default + Send + Sync,
     Xfrm::LocalAddr: From<<Channel::Socket as Socket>::Addr>,
     Ctx: 'static
-        + FarChannelRegistryCtx<Channel, F, AuthN, Xfrm>
+        + FarChannelRegistryCtx<Channel, F, SessionAuth, Xfrm>
         + NSNameCachesCtx
         + Send
         + Sync,
@@ -170,11 +222,16 @@ pub struct UnicastClientComponent<
     xfrm: PhantomData<Xfrm>,
     resolver: PhantomData<Resolver>,
     session: PhantomData<Session>,
-    config: UnicastClientConfig<
-        ChannelRegistryChannelsConfig<MsgCodec::Param>,
-        Epochs::Config,
-        Endpoint
-    >,
+    config:
+        UnicastClientConfig<
+            ChannelRegistryChannelsConfig<
+                <LargeObjMsgCodec<H> as DatagramCodec<
+                    LargeObjMsg<H::HashID>
+                >>::Param
+            >,
+            Epochs::Config,
+            Endpoint
+        >,
     session_config: Session::Config,
     listener: ThreadedFlowsListener<
         <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
@@ -183,7 +240,7 @@ pub struct UnicastClientComponent<
             F::ChannelID,
             Channel::Param
         >,
-        AuthN::Prin
+        SessionAuth::Prin
     >,
     shutdown: ShutdownFlag,
     ctx: Ctx
@@ -206,45 +263,74 @@ pub enum UnicastClientComponentRunError<Session, Unicast, Start> {
 }
 
 impl<
+        Msg,
+        Wrapper,
+        MsgAuth,
+        WrapperCodec,
+        H,
+        IDs,
+        Recv,
         Session,
-        MsgCodec,
         Epochs,
         Channel,
         F,
-        AuthN,
+        SessionAuth,
         Xfrm,
         Ctx,
         Resolver,
         Endpoint
     >
     UnicastClientComponent<
+        Msg,
+        Wrapper,
+        MsgAuth,
+        WrapperCodec,
+        H,
+        IDs,
+        Recv,
         Session,
-        MsgCodec,
         Epochs,
         Channel,
         F,
-        AuthN,
+        SessionAuth,
         Xfrm,
         Ctx,
         Resolver,
         Endpoint
     >
 where
-    Session: UnicastClientSession<AuthN::Prin>,
-    Session::Msg: 'static,
-    Session::Msgs: 'static,
-    Session::Recv: 'static,
+    Recv: 'static + Clone + AuthNMsgRecv<MsgAuth::Prin, Msg> + Send,
+    IDs: 'static + Clone + IDGen + Iterator<Item = LargeObjID> + Send,
+    Msg: 'static + Clone + Send,
+    Wrapper: 'static + Clone + Send,
+    WrapperCodec: 'static + Clone + DatagramCodec<Wrapper> + Send,
+    MsgAuth: 'static
+        + Clone
+        + MsgAuthN<Msg, Wrapper, SessionPrin = SessionAuth::Prin>
+        + Send,
+    MsgAuth::SessionPrin: Send + Sync,
+    H: 'static + Clone + Default + HashAlgo + Send,
+    H::HashID: Clone + Display + Hash + Eq + Send,
+    Session: UnicastClientSession<
+        H::HashID,
+        Msg,
+        Wrapper,
+        MsgAuth,
+        WrapperCodec,
+        IDs,
+        Recv
+    >,
     Epochs: 'static + IDGen + Iterator<Item = u128> + Send + Sync,
-    AuthN: 'static
+    Epochs::Item: Clone + Default + Display + Ord + Send,
+    SessionAuth: 'static
         + Clone
         + SessionAuthN<<Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow>
         + Send
         + Sync,
-    AuthN::Prin: 'static + Clone + Display + Eq + Hash + Send,
-    MsgCodec: 'static + Clone + DatagramCodec<Session::Msg> + Send,
-    <MsgCodec as DatagramCodec<Session::Msg>>::Param: Default,
+    SessionAuth::Prin: 'static + Clone + Display + Eq + Hash + Send + Sync,
+    <WrapperCodec as DatagramCodec<Wrapper>>::Param: Default,
     Channel: 'static
-        + FarChannelOwnedFlows<F, AuthN, Xfrm>
+        + FarChannelOwnedFlows<F, SessionAuth, Xfrm>
         + FarChannelCreate
         + Send
         + Sync,
@@ -263,8 +349,13 @@ where
     <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow:
         ConcurrentStream + Send,
     <Channel::Xfrm as DatagramXfrm>::PeerAddr: Eq + Hash + Send + Sync,
-    F: 'static,
-    F: OwnedFlowsCreate<Channel::Socket, Channel::Nego, AuthN, Channel::Xfrm>
+    F: 'static
+        + OwnedFlowsCreate<
+            Channel::Socket,
+            Channel::Nego,
+            SessionAuth,
+            Channel::Xfrm
+        >
         + Send,
     F::Flow: 'static + ConcurrentStream + Send,
     F::CreateParam: Clone + Default + Send + Sync,
@@ -278,7 +369,7 @@ where
     Xfrm::CreateParam: Clone + Default + Send + Sync,
     Xfrm::LocalAddr: From<<Channel::Socket as Socket>::Addr>,
     Ctx: 'static
-        + FarChannelRegistryCtx<Channel, F, AuthN, Xfrm>
+        + FarChannelRegistryCtx<Channel, F, SessionAuth, Xfrm>
         + NSNameCachesCtx
         + Send
         + Sync,
@@ -299,7 +390,7 @@ where
 {
     pub fn create(
         config: UnicastClientConfig<
-            ChannelRegistryChannelsConfig<MsgCodec::Param>,
+            ChannelRegistryChannelsConfig<()>,
             Epochs::Config,
             Endpoint
         >,
@@ -311,7 +402,7 @@ where
                 F::ChannelID,
                 Channel::Param
             >,
-            AuthN::Prin
+            SessionAuth::Prin
         >,
         shutdown: ShutdownFlag,
         ctx: Ctx
@@ -349,9 +440,9 @@ where
                         <Channel::Acquired as FarChannelAcquired>::WrapError
                     >
                 >,
-                MsgCodec::CreateError,
+                Infallible,
                 StreamSelectorCreateError<
-                    FarChannelRegistryChannelsCreateError<MsgCodec::CreateError>,
+                    FarChannelRegistryChannelsCreateError<Infallible>,
                     Resolver::CreateError
                 >,
                 ThreadedStreamSelectorError<
@@ -386,13 +477,16 @@ where
               "starting unicast client component");
 
         let unicast_config = config.take();
-        let (session, msgs, notify, recv) = Session::create(session_config)
+        let (session, notify, proto) = Session::create(session_config)
             .map_err(|err| UnicastClientComponentRunError::Session {
                 err: err
             })?;
         let unicast: UnicastLargeObjBus<
             _,
-            MsgCodec,
+            _,
+            WrapperCodec,
+            H,
+            _,
             _,
             _,
             Epochs,
@@ -409,8 +503,7 @@ where
             ctx,
             shutdown.clone(),
             notify,
-            recv.clone(),
-            msgs.clone()
+            proto.clone()
         )
         .map_err(|err| UnicastClientComponentRunError::Unicast { err: err })?;
         let session_cleanup = session.start().map_err(|err| {

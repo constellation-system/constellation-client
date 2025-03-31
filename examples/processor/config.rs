@@ -53,7 +53,9 @@ pub struct ProcessorConfig {
     #[serde(flatten)]
     multicast: UnicastClientConfig<
         ChannelRegistryChannelsConfig<
-            <LargeObjMsgCodec<SHA3Algo> as DatagramCodec<LargeObjMsg<SHA3ID>>>::Param
+            <LargeObjMsgCodec<SHA3Algo> as DatagramCodec<
+                LargeObjMsg<SHA3ID>
+            >>::Param
         >,
         <AscendingCount as IDGen>::Config,
         CompoundFarEndpoint
@@ -70,7 +72,9 @@ impl ProcessorConfig {
         RegistryConfig,
         UnicastClientConfig<
             ChannelRegistryChannelsConfig<
-                <LargeObjMsgCodec<SHA3Algo> as DatagramCodec<LargeObjMsg<SHA3ID>>>::Param
+                <LargeObjMsgCodec<SHA3Algo> as DatagramCodec<
+                    LargeObjMsg<SHA3ID>
+                >>::Param
             >,
             <AscendingCount as IDGen>::Config,
             CompoundFarEndpoint

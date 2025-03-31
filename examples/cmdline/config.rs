@@ -54,7 +54,9 @@ pub struct CmdlineConfig {
     multicast: MulticastClientConfig<
         String,
         ChannelRegistryChannelsConfig<
-            <LargeObjMsgCodec<SHA3Algo> as DatagramCodec<LargeObjMsg<SHA3ID>>>::Param
+            <LargeObjMsgCodec<SHA3Algo> as DatagramCodec<
+                LargeObjMsg<SHA3ID>
+            >>::Param
         >,
         <AscendingCount as IDGen>::Config,
         CompoundFarEndpoint
@@ -72,7 +74,9 @@ impl CmdlineConfig {
         MulticastClientConfig<
             String,
             ChannelRegistryChannelsConfig<
-                <LargeObjMsgCodec<SHA3Algo> as DatagramCodec<LargeObjMsg<SHA3ID>>>::Param
+                <LargeObjMsgCodec<SHA3Algo> as DatagramCodec<
+                    LargeObjMsg<SHA3ID>
+                >>::Param
             >,
             <AscendingCount as IDGen>::Config,
             CompoundFarEndpoint
