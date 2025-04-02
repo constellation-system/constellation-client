@@ -58,6 +58,7 @@ use constellation_channels::far::FarChannelOwnedFlows;
 use constellation_channels::resolve::cache::NSNameCachesCtx;
 use constellation_channels::resolve::MixedResolver;
 use constellation_channels::unix::UnixSocketAddr;
+use constellation_common::codec::Codec;
 use constellation_common::codec::DatagramCodec;
 use constellation_common::hashid::HashAlgo;
 use constellation_common::ids::IDGen;
@@ -148,7 +149,7 @@ pub struct MulticastClientComponent<
     Msg: Clone + Send,
     Wrapper: Clone + Send,
     WrapperCodec: Clone + DatagramCodec<Wrapper> + Send,
-    <WrapperCodec as DatagramCodec<Wrapper>>::Param: Default,
+    <WrapperCodec as Codec<Wrapper>>::Param: Default,
     H: Clone + Default + HashAlgo + Send,
     H::HashID: Clone + Display + Hash + Eq + Send,
     Session: MulticastClientSession<
@@ -309,7 +310,7 @@ where
     Msg: 'static + Clone + Send,
     Wrapper: 'static + Clone + Send,
     WrapperCodec: 'static + Clone + DatagramCodec<Wrapper> + Send,
-    <WrapperCodec as DatagramCodec<Wrapper>>::Param: Default,
+    <WrapperCodec as Codec<Wrapper>>::Param: Default,
     H: 'static + Clone + Default + HashAlgo + Send,
     H::HashID: Clone + Display + Hash + Eq + Send,
     Session: MulticastClientSession<

@@ -57,6 +57,7 @@ use constellation_channels::far::FarChannelOwnedFlows;
 use constellation_channels::resolve::cache::NSNameCachesCtx;
 use constellation_channels::resolve::MixedResolver;
 use constellation_channels::unix::UnixSocketAddr;
+use constellation_common::codec::Codec;
 use constellation_common::codec::DatagramCodec;
 use constellation_common::hashid::HashAlgo;
 use constellation_common::ids::IDGen;
@@ -146,7 +147,7 @@ pub struct UnicastClientComponent<
     Msg: Clone + Send,
     Wrapper: Clone + Send,
     WrapperCodec: Clone + DatagramCodec<Wrapper> + Send,
-    <WrapperCodec as DatagramCodec<Wrapper>>::Param: Default,
+    <WrapperCodec as Codec<Wrapper>>::Param: Default,
     H: Clone + Default + HashAlgo + Send,
     H::HashID: Clone + Display + Hash + Eq + Send,
     Session: UnicastClientSession<
@@ -225,9 +226,7 @@ pub struct UnicastClientComponent<
     config:
         UnicastClientConfig<
             ChannelRegistryChannelsConfig<
-                <LargeObjMsgCodec<H> as DatagramCodec<
-                    LargeObjMsg<H::HashID>
-                >>::Param
+                <LargeObjMsgCodec<H> as Codec<LargeObjMsg<H::HashID>>>::Param
             >,
             Epochs::Config,
             Endpoint
@@ -328,7 +327,7 @@ where
         + Send
         + Sync,
     SessionAuth::Prin: 'static + Clone + Display + Eq + Hash + Send + Sync,
-    <WrapperCodec as DatagramCodec<Wrapper>>::Param: Default,
+    <WrapperCodec as Codec<Wrapper>>::Param: Default,
     Channel: 'static
         + FarChannelOwnedFlows<F, SessionAuth, Xfrm>
         + FarChannelCreate
