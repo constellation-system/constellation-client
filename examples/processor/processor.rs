@@ -27,6 +27,7 @@ use std::time::Instant;
 
 use clap::ArgMatches;
 use constellation_auth::authn::AuthNMsgRecv;
+use constellation_auth::authn::PassthruMsgAuthN;
 use constellation_auth::authn::TrivialAuthN;
 use constellation_channels::far::compound::CompoundFarChannel;
 use constellation_channels::far::compound::CompoundFarChannelThreadedFlows;
@@ -55,10 +56,14 @@ use constellation_common::sync::Notify;
 use constellation_common::version::FullVersion;
 use constellation_common::version::Version;
 use constellation_common::version::VersionSuffix;
+use constellation_component_common::xact::XactBatch;
+use constellation_component_common::xact::XactBatchCodec;
 use constellation_standalone::Standalone;
 use constellation_standalone::StandaloneService;
+use constellation_streams::frags::OutboundFrags;
+use constellation_streams::large_obj::LargeObjID;
 use constellation_streams::large_obj::LargeObjMsg;
-use constellation_streams::large_obj::LargeObjMsgCodec;
+use constellation_streams::large_obj::LargeObjProto;
 use log::debug;
 use log::error;
 use log::info;
@@ -102,10 +107,16 @@ pub struct StandaloneCtx {
 
 pub struct StandaloneProcessor {
     component: CompoundUnicastClientComponent<
-        StandaloneCtx,
+        XactBatch<SHA3ID>,
+        XactBatch<SHA3ID>,
+        PassthruMsgAuthN<XactBatch<SHA3ID>, TestCred>,
+        XactBatchCodec<SHA3Algo>,
+        SHA3Algo,
+        AscendingCount<LargeObjID>,
+        ProcessorSessionRecv,
         ProcessorSession,
-        AscendingCount,
-        LargeObjMsgCodec<SHA3Algo>
+        AscendingCount<u128>,
+        StandaloneCtx
     >
 }
 
@@ -165,13 +176,13 @@ impl PrivateMsgs<LargeObjMsg<SHA3ID>> for ProcessorSessionMsgs {
     }
 }
 
-impl AuthNMsgRecv<TestCred, LargeObjMsg<SHA3ID>> for ProcessorSessionRecv {
+impl AuthNMsgRecv<TestCred, XactBatch<SHA3ID>> for ProcessorSessionRecv {
     type RecvError = Infallible;
 
     fn recv_auth_msg(
         &mut self,
         prin: &TestCred,
-        msg: LargeObjMsg<SHA3ID>
+        msg: XactBatch<SHA3ID>
     ) -> Result<(), Self::RecvError> {
         info!(target: "processor-recv",
               "received message from {}: {:?}",
@@ -181,24 +192,43 @@ impl AuthNMsgRecv<TestCred, LargeObjMsg<SHA3ID>> for ProcessorSessionRecv {
     }
 }
 
-impl UnicastClientSession<TestCred> for ProcessorSession {
+impl
+    UnicastClientSession<
+        SHA3ID,
+        XactBatch<SHA3ID>,
+        XactBatch<SHA3ID>,
+        PassthruMsgAuthN<XactBatch<SHA3ID>, TestCred>,
+        XactBatchCodec<SHA3Algo>,
+        AscendingCount<LargeObjID>,
+        ProcessorSessionRecv
+    > for ProcessorSession
+{
     type Cleanup = ProcessorSessionCleanup;
     type Config = ();
     type CreateError = Infallible;
-    type Msg = LargeObjMsg<SHA3ID>;
-    type Msgs = ProcessorSessionMsgs;
-    type Recv = ProcessorSessionRecv;
     type StartError = MutexPoison;
 
     fn create(
         _config: Self::Config
-    ) -> Result<(Self, Self::Msgs, Notify, Self::Recv), Self::CreateError> {
-        Ok((
-            ProcessorSession,
-            ProcessorSessionMsgs,
-            Notify::new(),
-            ProcessorSessionRecv
-        ))
+    ) -> Result<
+        (
+            Self,
+            Notify,
+            LargeObjProto<
+                SHA3ID,
+                XactBatch<SHA3ID>,
+                XactBatch<SHA3ID>,
+                PassthruMsgAuthN<XactBatch<SHA3ID>, TestCred>,
+                (),
+                XactBatchCodec<SHA3Algo>,
+                AscendingCount<LargeObjID>,
+                ProcessorSessionRecv,
+                OutboundFrags
+            >
+        ),
+        Self::CreateError
+    > {
+        Ok((ProcessorSession, Notify::new(), ProcessorSessionRecv))
     }
 
     fn start(self) -> Result<Self::Cleanup, Self::StartError> {

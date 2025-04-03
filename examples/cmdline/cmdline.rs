@@ -30,6 +30,7 @@ use std::time::Instant;
 
 use clap::ArgMatches;
 use constellation_auth::authn::AuthNMsgRecv;
+use constellation_auth::authn::PassthruMsgAuthN;
 use constellation_auth::authn::TestAuthN;
 use constellation_channels::config::CompoundFarEndpoint;
 use constellation_channels::far::compound::CompoundFarChannel;
@@ -61,11 +62,16 @@ use constellation_common::version::FullVersion;
 use constellation_common::version::Version;
 use constellation_common::version::VersionSuffix;
 use constellation_component_common::config::PartiesConfig;
+use constellation_component_common::xact::XactBatch;
+use constellation_component_common::xact::XactBatchCodec;
 use constellation_component_common::PartyStreamIdx;
 use constellation_standalone::Standalone;
 use constellation_standalone::StandaloneApp;
+use constellation_streams::frags::OutboundFrags;
+use constellation_streams::large_obj::LargeObjID;
 use constellation_streams::large_obj::LargeObjMsg;
-use constellation_streams::large_obj::LargeObjMsgCodec;
+use constellation_streams::large_obj::LargeObjProto;
+use constellation_streams::multicast::StreamMulticasterFrags;
 use log::error;
 use log::info;
 use log::warn;
@@ -109,10 +115,16 @@ pub struct StandaloneCtx {
 
 pub struct StandaloneCmdline {
     component: CompoundMulticastClientComponent<
-        StandaloneCtx,
+        XactBatch<SHA3ID>,
+        XactBatch<SHA3ID>,
+        PassthruMsgAuthN<XactBatch<SHA3ID>, String>,
+        XactBatchCodec<SHA3Algo>,
+        SHA3Algo,
+        AscendingCount<LargeObjID>,
+        CmdlineSessionRecv,
         CmdlineSession,
-        AscendingCount,
-        LargeObjMsgCodec<SHA3Algo>
+        AscendingCount<u128>,
+        StandaloneCtx
     >
 }
 
@@ -145,7 +157,7 @@ impl
     }
 }
 
-impl SharedMsgs<PartyStreamIdx, LargeObjMsg<SHA3ID>> for CmdlineSessionMsgs {
+impl SharedMsgs<PartyStreamIdx, XactBatch<SHA3ID>> for CmdlineSessionMsgs {
     /// Type of errors that can occur when collecting messages.
     type MsgsError = MutexPoison;
 
@@ -173,13 +185,13 @@ impl SharedMsgs<PartyStreamIdx, LargeObjMsg<SHA3ID>> for CmdlineSessionMsgs {
     }
 }
 
-impl AuthNMsgRecv<String, LargeObjMsg<SHA3ID>> for CmdlineSessionRecv {
+impl AuthNMsgRecv<String, XactBatch<SHA3ID>> for CmdlineSessionRecv {
     type RecvError = Infallible;
 
     fn recv_auth_msg(
         &mut self,
         prin: &String,
-        msg: LargeObjMsg<SHA3ID>
+        msg: XactBatch<SHA3ID>
     ) -> Result<(), Self::RecvError> {
         info!(target: "cmdline-recv",
               "received message from {}: {:?}",
@@ -189,25 +201,48 @@ impl AuthNMsgRecv<String, LargeObjMsg<SHA3ID>> for CmdlineSessionRecv {
     }
 }
 
-impl MulticastClientSession<String> for CmdlineSession {
+impl
+    MulticastClientSession<
+        SHA3ID,
+        XactBatch<SHA3ID>,
+        XactBatch<SHA3ID>,
+        PassthruMsgAuthN<XactBatch<SHA3ID>, String>,
+        XactBatchCodec<SHA3Algo>,
+        AscendingCount<LargeObjID>,
+        CmdlineSessionRecv
+    > for CmdlineSession
+{
     type Cleanup = CmdlineSessionCleanup;
     type Config = ();
     type CreateError = Infallible;
-    type Msg = LargeObjMsg<SHA3ID>;
-    type Msgs = CmdlineSessionMsgs;
-    type Recv = CmdlineSessionRecv;
     type StartError = MutexPoison;
 
     fn create(
         _config: Self::Config
-    ) -> Result<(Self, Self::Msgs, Notify, Self::Recv), Self::CreateError> {
+    ) -> Result<
+        (
+            Self,
+            Notify,
+            LargeObjProto<
+                SHA3ID,
+                XactBatch<SHA3ID>,
+                XactBatch<SHA3ID>,
+                PassthruMsgAuthN<XactBatch<SHA3ID>, String>,
+                PartyStreamIdx,
+                XactBatchCodec<SHA3Algo>,
+                AscendingCount<LargeObjID>,
+                CmdlineSessionRecv,
+                StreamMulticasterFrags<PartyStreamIdx, OutboundFrags>
+            >
+        ),
+        Self::CreateError
+    > {
         let parties = Arc::new(RwLock::new(Vec::new()));
 
         Ok((
             CmdlineSession {
                 parties: parties.clone()
             },
-            CmdlineSessionMsgs { parties: parties },
             Notify::new(),
             CmdlineSessionRecv
         ))

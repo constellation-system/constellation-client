@@ -58,7 +58,6 @@ use constellation_channels::resolve::cache::NSNameCachesCtx;
 use constellation_channels::resolve::MixedResolver;
 use constellation_channels::unix::UnixSocketAddr;
 use constellation_common::codec::Codec;
-use constellation_common::codec::DatagramCodec;
 use constellation_common::hashid::HashAlgo;
 use constellation_common::ids::IDGen;
 use constellation_common::net::DatagramXfrm;
@@ -146,7 +145,7 @@ pub struct UnicastClientComponent<
     MsgAuth::SessionPrin: Send + Sync,
     Msg: Clone + Send,
     Wrapper: Clone + Send,
-    WrapperCodec: Clone + DatagramCodec<Wrapper> + Send,
+    WrapperCodec: Clone + Codec<Wrapper> + Send,
     <WrapperCodec as Codec<Wrapper>>::Param: Default,
     H: Clone + Default + HashAlgo + Send,
     H::HashID: Clone + Display + Hash + Eq + Send,
@@ -223,14 +222,13 @@ pub struct UnicastClientComponent<
     xfrm: PhantomData<Xfrm>,
     resolver: PhantomData<Resolver>,
     session: PhantomData<Session>,
-    config:
-        UnicastClientConfig<
-            ChannelRegistryChannelsConfig<
-                <LargeObjMsgCodec<H> as Codec<LargeObjMsg<H::HashID>>>::Param
-            >,
-            Epochs::Config,
-            Endpoint
+    config: UnicastClientConfig<
+        ChannelRegistryChannelsConfig<
+            <LargeObjMsgCodec<H> as Codec<LargeObjMsg<H::HashID>>>::Param
         >,
+        Epochs::Config,
+        Endpoint
+    >,
     session_config: Session::Config,
     listener: ThreadedFlowsListener<
         <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
@@ -302,7 +300,7 @@ where
     IDs: 'static + Clone + IDGen + Iterator<Item = LargeObjID> + Send,
     Msg: 'static + Clone + Send,
     Wrapper: 'static + Clone + Send,
-    WrapperCodec: 'static + Clone + DatagramCodec<Wrapper> + Send,
+    WrapperCodec: 'static + Clone + Codec<Wrapper> + Send,
     MsgAuth: 'static
         + Clone
         + MsgAuthN<Msg, Wrapper, SessionPrin = SessionAuth::Prin>

@@ -59,7 +59,6 @@ use constellation_channels::resolve::cache::NSNameCachesCtx;
 use constellation_channels::resolve::MixedResolver;
 use constellation_channels::unix::UnixSocketAddr;
 use constellation_common::codec::Codec;
-use constellation_common::codec::DatagramCodec;
 use constellation_common::hashid::HashAlgo;
 use constellation_common::ids::IDGen;
 use constellation_common::net::DatagramXfrm;
@@ -70,13 +69,10 @@ use constellation_common::shutdown::ShutdownFlag;
 use constellation_component_common::bus::large_obj::multicast::MulticastLargeObjBus;
 use constellation_component_common::bus::large_obj::multicast::MulticastLargeObjBusCleanup;
 use constellation_component_common::bus::large_obj::multicast::MulticastLargeObjBusRunError;
-use constellation_component_common::PartyStreamIdx;
 use constellation_streams::addrs::Addrs;
 use constellation_streams::addrs::AddrsCreate;
 use constellation_streams::channels::ChannelParam;
-use constellation_streams::frags::OutboundFrags;
 use constellation_streams::large_obj::LargeObjID;
-use constellation_streams::multicast::StreamMulticasterFrags;
 use constellation_streams::select::StreamSelectorCreateError;
 use constellation_streams::select::ThreadedStreamSelectorError;
 use constellation_streams::stream::ConcurrentStream;
@@ -148,7 +144,7 @@ pub struct MulticastClientComponent<
     MsgAuth::SessionPrin: Send + Sync,
     Msg: Clone + Send,
     Wrapper: Clone + Send,
-    WrapperCodec: Clone + DatagramCodec<Wrapper> + Send,
+    WrapperCodec: Clone + Codec<Wrapper> + Send,
     <WrapperCodec as Codec<Wrapper>>::Param: Default,
     H: Clone + Default + HashAlgo + Send,
     H::HashID: Clone + Display + Hash + Eq + Send,
@@ -157,11 +153,9 @@ pub struct MulticastClientComponent<
         Msg,
         Wrapper,
         MsgAuth,
-        PartyStreamIdx,
         WrapperCodec,
         IDs,
-        Recv,
-        StreamMulticasterFrags<PartyStreamIdx, OutboundFrags>
+        Recv
     >,
     Epochs: 'static + IDGen + Iterator<Item = u128> + Send + Sync,
     Epochs::Item: Clone + Default + Display + Ord + Send,
@@ -309,7 +303,7 @@ where
     MsgAuth::SessionPrin: Send + Sync,
     Msg: 'static + Clone + Send,
     Wrapper: 'static + Clone + Send,
-    WrapperCodec: 'static + Clone + DatagramCodec<Wrapper> + Send,
+    WrapperCodec: 'static + Clone + Codec<Wrapper> + Send,
     <WrapperCodec as Codec<Wrapper>>::Param: Default,
     H: 'static + Clone + Default + HashAlgo + Send,
     H::HashID: Clone + Display + Hash + Eq + Send,
@@ -318,11 +312,9 @@ where
         Msg,
         Wrapper,
         MsgAuth,
-        PartyStreamIdx,
         WrapperCodec,
         IDs,
-        Recv,
-        StreamMulticasterFrags<PartyStreamIdx, OutboundFrags>
+        Recv
     >,
     Epochs: 'static + IDGen + Iterator<Item = u128> + Send + Sync,
     Epochs::Item: Clone + Default + Display + Ord + Send,

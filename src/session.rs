@@ -21,34 +21,24 @@ use std::hash::Hash;
 
 use constellation_auth::authn::AuthNMsgRecv;
 use constellation_auth::authn::MsgAuthN;
-use constellation_common::codec::DatagramCodec;
+use constellation_common::codec::Codec;
 use constellation_common::hashid::HashID;
 use constellation_common::ids::IDGen;
 use constellation_common::sync::Notify;
 use constellation_component_common::PartyStreamIdx;
-use constellation_streams::frags::Frags;
 use constellation_streams::frags::OutboundFrags;
 use constellation_streams::large_obj::LargeObjID;
 use constellation_streams::large_obj::LargeObjProto;
+use constellation_streams::multicast::StreamMulticasterFrags;
 
-pub trait MulticastClientSession<
-    H,
-    Msg,
-    Wrapper,
-    Auth,
-    PartyID,
-    Codec,
-    IDs,
-    Recv,
-    F
->: Sized where
+pub trait MulticastClientSession<H, Msg, Wrapper, Auth, WrapperCodec, IDs, Recv>:
+    Sized
+where
     Recv: AuthNMsgRecv<Auth::Prin, Msg>,
     IDs: IDGen + Iterator<Item = LargeObjID>,
     Auth: MsgAuthN<Msg, Wrapper>,
-    Codec: DatagramCodec<Wrapper>,
-    H: Clone + Display + Hash + HashID + Eq,
-    PartyID: Clone,
-    F: Frags {
+    WrapperCodec: Codec<Wrapper>,
+    H: Clone + Display + Hash + HashID + Eq {
     type Config;
     type CreateError: Display;
     type StartError: Display;
@@ -60,7 +50,17 @@ pub trait MulticastClientSession<
         (
             Self,
             Notify,
-            LargeObjProto<H, Msg, Wrapper, Auth, PartyID, Codec, IDs, Recv, F>
+            LargeObjProto<
+                H,
+                Msg,
+                Wrapper,
+                Auth,
+                PartyStreamIdx,
+                WrapperCodec,
+                IDs,
+                Recv,
+                StreamMulticasterFrags<PartyStreamIdx, OutboundFrags>
+            >
         ),
         Self::CreateError
     >;
@@ -73,13 +73,13 @@ pub trait MulticastClientSession<
         I: Iterator<Item = (PartyStreamIdx, Auth::SessionPrin)>;
 }
 
-pub trait UnicastClientSession<H, Msg, Wrapper, Auth, Codec, IDs, Recv>:
+pub trait UnicastClientSession<H, Msg, Wrapper, Auth, WrapperCodec, IDs, Recv>:
     Sized
 where
     Recv: AuthNMsgRecv<Auth::Prin, Msg>,
     IDs: IDGen + Iterator<Item = LargeObjID>,
     Auth: MsgAuthN<Msg, Wrapper>,
-    Codec: DatagramCodec<Wrapper>,
+    WrapperCodec: Codec<Wrapper>,
     H: Clone + Display + Hash + HashID + Eq {
     type Config;
     type CreateError: Display;
@@ -98,7 +98,7 @@ where
                 Wrapper,
                 Auth,
                 (),
-                Codec,
+                WrapperCodec,
                 IDs,
                 Recv,
                 OutboundFrags
