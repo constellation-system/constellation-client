@@ -42,8 +42,7 @@ pub trait MulticastClientSession<
     IDs,
     Msgs,
     Recv
->: Sized
-where
+>: Sized where
     Recv: AuthNMsgRecv<Auth::Prin, Msg>,
     Msgs: LargeObjMsgs<H, Wrapper> + Send,
     IDs: IDGen + Iterator<Item = LargeObjID>,
@@ -96,8 +95,7 @@ pub trait UnicastClientSession<
     IDs,
     Msgs,
     Recv
->: Sized
-where
+>: Sized where
     Recv: AuthNMsgRecv<Auth::Prin, Msg>,
     Msgs: LargeObjMsgs<H, Wrapper> + Send,
     IDs: IDGen + Iterator<Item = LargeObjID>,

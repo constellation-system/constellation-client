@@ -29,6 +29,7 @@ use constellation_common::hashid::SHA3Algo;
 use constellation_common::hashid::SHA3ID;
 use constellation_common::ids::AscendingCount;
 use constellation_common::ids::IDGen;
+use constellation_streams::config::LargeObjProtoConfig;
 use constellation_streams::large_obj::LargeObjID;
 use constellation_streams::large_obj::LargeObjMsg;
 use constellation_streams::large_obj::LargeObjMsgCodec;
@@ -60,7 +61,7 @@ pub struct ProcessorConfig {
         CompoundFarEndpoint
     >,
     #[serde(default)]
-    session: ()
+    session: LargeObjProtoConfig<(), ()>
 }
 
 impl ProcessorConfig {
@@ -78,7 +79,7 @@ impl ProcessorConfig {
             <AscendingCount<LargeObjID> as IDGen>::Config,
             CompoundFarEndpoint
         >,
-        ()
+        LargeObjProtoConfig<(), ()>
     ){
         (
             self.name_caches,
