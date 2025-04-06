@@ -73,6 +73,7 @@ use constellation_streams::addrs::Addrs;
 use constellation_streams::addrs::AddrsCreate;
 use constellation_streams::channels::ChannelParam;
 use constellation_streams::large_obj::LargeObjID;
+use constellation_streams::large_obj::LargeObjMsgs;
 use constellation_streams::select::StreamSelectorCreateError;
 use constellation_streams::select::ThreadedStreamSelectorError;
 use constellation_streams::stream::ConcurrentStream;
@@ -91,6 +92,7 @@ pub type CompoundMulticastClientComponent<
     WrapperCodec,
     H,
     IDs,
+    Msgs,
     Recv,
     Session,
     Epochs,
@@ -102,6 +104,7 @@ pub type CompoundMulticastClientComponent<
     WrapperCodec,
     H,
     IDs,
+    Msgs,
     Recv,
     Session,
     Epochs,
@@ -126,6 +129,7 @@ pub struct MulticastClientComponent<
     WrapperCodec,
     H,
     IDs,
+    Msgs,
     Recv,
     Session,
     Epochs,
@@ -138,6 +142,7 @@ pub struct MulticastClientComponent<
     Endpoint
 > where
     Recv: Clone + AuthNMsgRecv<MsgAuth::Prin, Msg> + Send,
+    Msgs: Clone + LargeObjMsgs<H, Wrapper> + Send,
     IDs: Clone + IDGen + Iterator<Item = LargeObjID> + Send,
     MsgAuth:
         Clone + MsgAuthN<Msg, Wrapper, SessionPrin = SessionAuth::Prin> + Send,
@@ -149,12 +154,13 @@ pub struct MulticastClientComponent<
     H: Clone + Default + HashAlgo + Send,
     H::HashID: Clone + Display + Hash + Eq + Send,
     Session: MulticastClientSession<
-        H::HashID,
+        H,
         Msg,
         Wrapper,
         MsgAuth,
         WrapperCodec,
         IDs,
+        Msgs,
         Recv
     >,
     Epochs: 'static + IDGen + Iterator<Item = u128> + Send + Sync,
@@ -264,6 +270,7 @@ impl<
         WrapperCodec,
         H,
         IDs,
+        Msgs,
         Recv,
         Session,
         Epochs,
@@ -282,6 +289,7 @@ impl<
         WrapperCodec,
         H,
         IDs,
+        Msgs,
         Recv,
         Session,
         Epochs,
@@ -295,6 +303,7 @@ impl<
     >
 where
     Recv: 'static + Clone + AuthNMsgRecv<MsgAuth::Prin, Msg> + Send,
+    Msgs: 'static + Clone + LargeObjMsgs<H, Wrapper> + Send,
     IDs: 'static + Clone + IDGen + Iterator<Item = LargeObjID> + Send,
     MsgAuth: 'static
         + Clone
@@ -308,12 +317,13 @@ where
     H: 'static + Clone + Default + HashAlgo + Send,
     H::HashID: Clone + Display + Hash + Eq + Send,
     Session: MulticastClientSession<
-        H::HashID,
+        H,
         Msg,
         Wrapper,
         MsgAuth,
         WrapperCodec,
         IDs,
+        Msgs,
         Recv
     >,
     Epochs: 'static + IDGen + Iterator<Item = u128> + Send + Sync,
@@ -481,6 +491,7 @@ where
             _,
             WrapperCodec,
             H,
+            _,
             _,
             _,
             _,
