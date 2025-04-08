@@ -80,6 +80,7 @@ use constellation_streams::large_obj::LargeObjProtoAddOutboundError;
 use constellation_streams::large_obj::LargeObjProtoCreateError;
 use constellation_streams::large_obj::LargeObjSender;
 use constellation_streams::multicast::StreamMulticasterFrags;
+use log::debug;
 use log::error;
 use log::info;
 use log::warn;
@@ -93,6 +94,7 @@ pub struct CmdlineSession {
 #[derive(Clone)]
 pub struct CmdlineSessionMsgs {
     hash: SHA3Algo,
+    when: Instant,
     count: u64
 }
 
@@ -149,6 +151,7 @@ impl CmdlineSessionMsgs {
     #[inline]
     fn new(hash: SHA3Algo) -> Self {
         CmdlineSessionMsgs {
+            when: Instant::now(),
             hash: hash,
             count: 0
         }
@@ -194,39 +197,44 @@ impl
 }
 
 impl LargeObjMsgs<SHA3Algo, XactBatch<SHA3ID>> for CmdlineSessionMsgs {
-    type AddMsgsError<ID, Encode>
-        = LargeObjProtoAddOutboundError<ID, SHA3ID, Encode>
+    type AddMsgsError<Encode>
+        = LargeObjProtoAddOutboundError<SHA3ID, Encode>
     where
-        ID: Display,
         Encode: Display + ScopedError;
 
-    fn add_msgs<WrapperCodec, IDs, F>(
+    fn add_msgs<WrapperCodec, F>(
         &mut self,
         sender: &mut LargeObjSender<
             SHA3Algo,
             XactBatch<SHA3ID>,
             WrapperCodec,
-            IDs,
             F
         >
-    ) -> Result<
-        Option<Instant>,
-        Self::AddMsgsError<IDs::Item, WrapperCodec::EncodeError>
-    >
+    ) -> Result<Option<Instant>, Self::AddMsgsError<WrapperCodec::EncodeError>>
     where
-        IDs: IDGen + Iterator<Item = LargeObjID>,
         WrapperCodec: Clone + Codec<XactBatch<SHA3ID>>,
         WrapperCodec::Param: Default,
         F: Frags {
-        let batch =
-            XactBatch::create(&self.hash, self.count, once(vec![0x55; 512]));
+        let now = Instant::now();
 
-        sender.add_outbound(&batch)?;
-        self.count += 1;
+        if now >= self.when {
+            debug!(target: "cmdline-msgs",
+                   "generating outgoing batch, seqnum {}",
+                   self.count);
 
-        let when = Instant::now() + Duration::from_secs(5);
+            let batch = XactBatch::create(
+                &self.hash,
+                self.count,
+                once(vec![0x33; 10000])
+            );
 
-        Ok(Some(when))
+            sender.add_outbound(&batch)?;
+            self.count += 1;
+
+            self.when = now + Duration::from_secs(5);
+        }
+
+        Ok(Some(self.when))
     }
 }
 
