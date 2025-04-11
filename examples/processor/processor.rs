@@ -53,7 +53,6 @@ use constellation_common::error::ScopedError;
 use constellation_common::hashid::SHA3Algo;
 use constellation_common::hashid::SHA3ID;
 use constellation_common::ids::AscendingCount;
-use constellation_common::ids::IDGen;
 use constellation_common::shutdown::ShutdownFlag;
 use constellation_common::sync::Notify;
 use constellation_common::version::FullVersion;
@@ -200,7 +199,7 @@ impl LargeObjMsgs<SHA3Algo, XactBatch<SHA3ID>> for ProcessorSessionMsgs {
         F: Frags {
         let now = Instant::now();
 
-        if now >= self.when {
+        if self.when <= now {
             debug!(target: "processor-msgs",
                    "generating outgoing batch, seqnum {}",
                    self.count);
