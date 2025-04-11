@@ -298,10 +298,18 @@ impl
         let authn = PassthruMsgAuthN::default();
         let msgs = CmdlineSessionMsgs::new(hash.clone());
         let recv = CmdlineSessionRecv::default();
-        let proto = LargeObjProto::create(config, recv, msgs, authn, hash)?;
+        let notify = Notify::new();
+        let proto = LargeObjProto::create(
+            config,
+            notify.clone(),
+            recv,
+            msgs,
+            authn,
+            hash
+        )?;
         let session = CmdlineSession::new();
 
-        Ok((session, Notify::new(), proto))
+        Ok((session, notify, proto))
     }
 
     fn start<I>(

@@ -280,9 +280,17 @@ impl
         let authn = PassthruMsgAuthN::default();
         let msgs = ProcessorSessionMsgs::new(hash.clone());
         let recv = ProcessorSessionRecv::default();
-        let proto = LargeObjProto::create(config, recv, msgs, authn, hash)?;
+        let notify = Notify::new();
+        let proto = LargeObjProto::create(
+            config,
+            notify.clone(),
+            recv,
+            msgs,
+            authn,
+            hash
+        )?;
 
-        Ok((ProcessorSession, Notify::new(), proto))
+        Ok((ProcessorSession, notify, proto))
     }
 
     fn start(self) -> Result<Self::Cleanup, Self::StartError> {
