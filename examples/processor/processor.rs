@@ -20,6 +20,7 @@ use std::convert::Infallible;
 use std::fmt::Display;
 use std::fmt::Error;
 use std::fmt::Formatter;
+use std::iter::once;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -27,6 +28,7 @@ use std::time::Instant;
 
 use clap::ArgMatches;
 use constellation_auth::authn::AuthNMsgRecv;
+use constellation_auth::authn::PassthruMsgAuthN;
 use constellation_auth::authn::TrivialAuthN;
 use constellation_channels::far::compound::CompoundFarChannel;
 use constellation_channels::far::compound::CompoundFarChannelThreadedFlows;
@@ -45,29 +47,44 @@ use constellation_client::component::unicast::UnicastClientComponent;
 use constellation_client::component::unicast::UnicastClientComponentCleanup;
 use constellation_client::session::ClientSessionCleanup;
 use constellation_client::session::UnicastClientSession;
+use constellation_common::codec::Codec;
 use constellation_common::error::MutexPoison;
+use constellation_common::error::ScopedError;
+use constellation_common::hashid::SHA3Algo;
+use constellation_common::hashid::SHA3ID;
 use constellation_common::ids::AscendingCount;
-use constellation_common::net::PrivateMsgs;
 use constellation_common::shutdown::ShutdownFlag;
 use constellation_common::sync::Notify;
 use constellation_common::version::FullVersion;
 use constellation_common::version::Version;
 use constellation_common::version::VersionSuffix;
+use constellation_component_common::xact::XactBatch;
+use constellation_component_common::xact::XactBatchCodec;
 use constellation_standalone::Standalone;
 use constellation_standalone::StandaloneService;
-use constellation_streams::large_obj::LargeObjMsg;
-use constellation_streams::large_obj::LargeObjMsgCodec;
+use constellation_streams::config::LargeObjProtoConfig;
+use constellation_streams::frags::Frags;
+use constellation_streams::frags::OutboundFrags;
+use constellation_streams::large_obj::LargeObjID;
+use constellation_streams::large_obj::LargeObjMsgs;
+use constellation_streams::large_obj::LargeObjProto;
+use constellation_streams::large_obj::LargeObjProtoAddOutboundError;
+use constellation_streams::large_obj::LargeObjProtoCreateError;
+use constellation_streams::large_obj::LargeObjSender;
 use log::debug;
 use log::error;
 use log::info;
-use log::trace;
 
 use crate::config::ProcessorConfig;
 
 pub struct ProcessorSession;
 
 #[derive(Clone)]
-pub struct ProcessorSessionMsgs;
+pub struct ProcessorSessionMsgs {
+    hash: SHA3Algo,
+    when: Instant,
+    count: u64
+}
 
 #[derive(Clone)]
 pub struct ProcessorSessionRecv;
@@ -100,10 +117,17 @@ pub struct StandaloneCtx {
 
 pub struct StandaloneProcessor {
     component: CompoundUnicastClientComponent<
-        StandaloneCtx,
+        XactBatch<SHA3ID>,
+        XactBatch<SHA3ID>,
+        PassthruMsgAuthN<XactBatch<SHA3ID>, TestCred>,
+        XactBatchCodec<SHA3Algo>,
+        SHA3Algo,
+        AscendingCount<LargeObjID>,
+        ProcessorSessionMsgs,
+        ProcessorSessionRecv,
         ProcessorSession,
-        AscendingCount,
-        LargeObjMsgCodec
+        AscendingCount<u128>,
+        StandaloneCtx
     >
 }
 
@@ -136,38 +160,73 @@ impl
     }
 }
 
-impl PrivateMsgs<LargeObjMsg> for ProcessorSessionMsgs {
-    /// Type of errors that can occur when collecting messages.
-    type MsgsError = MutexPoison;
-
-    /// Collect and report outbound messages.
-    ///
-    /// This will provide the outbound messages, if there are any, as
-    /// well as the time at which to check again for new messages.
-    fn msgs(
-        &mut self
-    ) -> Result<(Option<Vec<LargeObjMsg>>, Option<Instant>), Self::MsgsError>
-    {
-        let now = Instant::now();
-        let when = now + Duration::from_secs(1);
-        let msg = LargeObjMsg::Finish {
-            id: 0x0123456789abcdef
-        };
-
-        trace!(target: "processor-msgs",
-               "gathering messages");
-
-        Ok((Some(vec![msg]), Some(when)))
+impl ProcessorSessionMsgs {
+    #[inline]
+    fn new(hash: SHA3Algo) -> Self {
+        ProcessorSessionMsgs {
+            when: Instant::now(),
+            hash: hash,
+            count: 0
+        }
     }
 }
 
-impl AuthNMsgRecv<TestCred, LargeObjMsg> for ProcessorSessionRecv {
+impl Default for ProcessorSessionRecv {
+    #[inline]
+    fn default() -> Self {
+        ProcessorSessionRecv
+    }
+}
+
+impl LargeObjMsgs<SHA3Algo, XactBatch<SHA3ID>> for ProcessorSessionMsgs {
+    type AddMsgsError<Encode>
+        = LargeObjProtoAddOutboundError<SHA3ID, Encode>
+    where
+        Encode: Display + ScopedError;
+
+    fn add_msgs<WrapperCodec, F>(
+        &mut self,
+        sender: &mut LargeObjSender<
+            SHA3Algo,
+            XactBatch<SHA3ID>,
+            WrapperCodec,
+            F
+        >
+    ) -> Result<Option<Instant>, Self::AddMsgsError<WrapperCodec::EncodeError>>
+    where
+        WrapperCodec: Clone + Codec<XactBatch<SHA3ID>>,
+        WrapperCodec::Param: Default,
+        F: Frags {
+        let now = Instant::now();
+
+        if self.when <= now {
+            debug!(target: "processor-msgs",
+                   "generating outgoing batch, seqnum {}",
+                   self.count);
+
+            let batch = XactBatch::create(
+                &self.hash,
+                self.count,
+                once(vec![0x22; 10000])
+            );
+
+            sender.add_outbound(&batch)?;
+            self.count += 1;
+
+            self.when = now + Duration::from_secs(5);
+        }
+
+        Ok(Some(self.when))
+    }
+}
+
+impl AuthNMsgRecv<TestCred, XactBatch<SHA3ID>> for ProcessorSessionRecv {
     type RecvError = Infallible;
 
     fn recv_auth_msg(
         &mut self,
         prin: &TestCred,
-        msg: LargeObjMsg
+        msg: XactBatch<SHA3ID>
     ) -> Result<(), Self::RecvError> {
         info!(target: "processor-recv",
               "received message from {}: {:?}",
@@ -177,24 +236,61 @@ impl AuthNMsgRecv<TestCred, LargeObjMsg> for ProcessorSessionRecv {
     }
 }
 
-impl UnicastClientSession<TestCred> for ProcessorSession {
+impl
+    UnicastClientSession<
+        SHA3Algo,
+        XactBatch<SHA3ID>,
+        XactBatch<SHA3ID>,
+        PassthruMsgAuthN<XactBatch<SHA3ID>, TestCred>,
+        XactBatchCodec<SHA3Algo>,
+        AscendingCount<LargeObjID>,
+        ProcessorSessionMsgs,
+        ProcessorSessionRecv
+    > for ProcessorSession
+{
     type Cleanup = ProcessorSessionCleanup;
-    type Config = ();
-    type CreateError = Infallible;
-    type Msg = LargeObjMsg;
-    type Msgs = ProcessorSessionMsgs;
-    type Recv = ProcessorSessionRecv;
+    type Config = LargeObjProtoConfig<(), ()>;
+    type CreateError = LargeObjProtoCreateError<
+        <XactBatchCodec<SHA3Algo> as Codec<XactBatch<SHA3ID>>>::CreateError
+    >;
     type StartError = MutexPoison;
 
     fn create(
-        _config: Self::Config
-    ) -> Result<(Self, Self::Msgs, Notify, Self::Recv), Self::CreateError> {
-        Ok((
-            ProcessorSession,
-            ProcessorSessionMsgs,
-            Notify::new(),
-            ProcessorSessionRecv
-        ))
+        config: Self::Config
+    ) -> Result<
+        (
+            Self,
+            Notify,
+            LargeObjProto<
+                SHA3Algo,
+                XactBatch<SHA3ID>,
+                XactBatch<SHA3ID>,
+                PassthruMsgAuthN<XactBatch<SHA3ID>, TestCred>,
+                (),
+                XactBatchCodec<SHA3Algo>,
+                AscendingCount<LargeObjID>,
+                ProcessorSessionMsgs,
+                ProcessorSessionRecv,
+                OutboundFrags
+            >
+        ),
+        Self::CreateError
+    > {
+        let hash = SHA3Algo::default();
+        let authn = PassthruMsgAuthN::default();
+        let msgs = ProcessorSessionMsgs::new(hash.clone());
+        let recv = ProcessorSessionRecv::default();
+        let notify = Notify::new();
+        let proto = LargeObjProto::create(
+            config,
+            notify.clone(),
+            recv,
+            msgs,
+            authn,
+            hash
+        )?;
+
+        Ok((ProcessorSession, notify, proto))
     }
 
     fn start(self) -> Result<Self::Cleanup, Self::StartError> {
@@ -294,7 +390,7 @@ impl StandaloneService for StandaloneProcessor {
         run_cleanup: Option<Self::RunCleanup>
     ) {
         debug!(target: "processor",
-               "cleaning up consensus");
+               "cleaning up processor");
 
         create_cleanup.shutdown.set();
 

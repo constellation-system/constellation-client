@@ -17,46 +17,119 @@
 // <https://www.gnu.org/licenses/>.
 
 use std::fmt::Display;
+use std::hash::Hash;
 
 use constellation_auth::authn::AuthNMsgRecv;
-use constellation_common::net::PrivateMsgs;
-use constellation_common::net::SharedMsgs;
+use constellation_auth::authn::MsgAuthN;
+use constellation_common::codec::Codec;
+use constellation_common::hashid::HashAlgo;
+use constellation_common::hashid::HashID;
+use constellation_common::ids::IDGen;
 use constellation_common::sync::Notify;
 use constellation_component_common::PartyStreamIdx;
+use constellation_streams::frags::OutboundFrags;
+use constellation_streams::large_obj::LargeObjID;
+use constellation_streams::large_obj::LargeObjMsgs;
+use constellation_streams::large_obj::LargeObjProto;
+use constellation_streams::multicast::StreamMulticasterFrags;
 
-pub trait MulticastClientSession<Prin>: Sized {
+pub trait MulticastClientSession<
+    H,
+    Msg,
+    Wrapper,
+    Auth,
+    WrapperCodec,
+    IDs,
+    Msgs,
+    Recv
+>: Sized where
+    Recv: AuthNMsgRecv<Auth::Prin, Msg>,
+    Msgs: LargeObjMsgs<H, Wrapper> + Send,
+    IDs: IDGen + Iterator<Item = LargeObjID>,
+    Auth: MsgAuthN<Msg, Wrapper>,
+    WrapperCodec: Clone + Codec<Wrapper>,
+    <WrapperCodec as Codec<Wrapper>>::Param: Default,
+    H: Clone + Default + HashAlgo + Send,
+    H::HashID: Clone + Display + Hash + HashID + Eq {
     type Config;
     type CreateError: Display;
     type StartError: Display;
-    type Msg: Clone + Send;
-    type Msgs: Clone + SharedMsgs<PartyStreamIdx, Self::Msg> + Send;
-    type Recv: Clone + AuthNMsgRecv<Prin, Self::Msg> + Send;
     type Cleanup: ClientSessionCleanup;
 
     fn create(
         config: Self::Config
-    ) -> Result<(Self, Self::Msgs, Notify, Self::Recv), Self::CreateError>;
+    ) -> Result<
+        (
+            Self,
+            Notify,
+            LargeObjProto<
+                H,
+                Msg,
+                Wrapper,
+                Auth,
+                PartyStreamIdx,
+                WrapperCodec,
+                IDs,
+                Msgs,
+                Recv,
+                StreamMulticasterFrags<PartyStreamIdx, OutboundFrags>
+            >
+        ),
+        Self::CreateError
+    >;
 
     fn start<I>(
         self,
         parties: I
     ) -> Result<Self::Cleanup, Self::StartError>
     where
-        I: Iterator<Item = (PartyStreamIdx, Prin)>;
+        I: Iterator<Item = (PartyStreamIdx, Auth::SessionPrin)>;
 }
 
-pub trait UnicastClientSession<Prin>: Sized {
+pub trait UnicastClientSession<
+    H,
+    Msg,
+    Wrapper,
+    Auth,
+    WrapperCodec,
+    IDs,
+    Msgs,
+    Recv
+>: Sized where
+    Recv: AuthNMsgRecv<Auth::Prin, Msg>,
+    Msgs: LargeObjMsgs<H, Wrapper> + Send,
+    IDs: IDGen + Iterator<Item = LargeObjID>,
+    Auth: MsgAuthN<Msg, Wrapper>,
+    WrapperCodec: Clone + Codec<Wrapper>,
+    <WrapperCodec as Codec<Wrapper>>::Param: Default,
+    H: Clone + Default + HashAlgo + Send,
+    H::HashID: Clone + Display + Hash + HashID + Eq {
     type Config;
     type CreateError: Display;
     type StartError: Display;
-    type Msg: Clone + Send;
-    type Msgs: Clone + PrivateMsgs<Self::Msg> + Send;
-    type Recv: Clone + AuthNMsgRecv<Prin, Self::Msg> + Send;
     type Cleanup: ClientSessionCleanup;
 
     fn create(
         config: Self::Config
-    ) -> Result<(Self, Self::Msgs, Notify, Self::Recv), Self::CreateError>;
+    ) -> Result<
+        (
+            Self,
+            Notify,
+            LargeObjProto<
+                H,
+                Msg,
+                Wrapper,
+                Auth,
+                (),
+                WrapperCodec,
+                IDs,
+                Msgs,
+                Recv,
+                OutboundFrags
+            >
+        ),
+        Self::CreateError
+    >;
 
     fn start(self) -> Result<Self::Cleanup, Self::StartError>;
 }

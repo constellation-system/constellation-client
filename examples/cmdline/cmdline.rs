@@ -21,6 +21,7 @@ use std::convert::TryFrom;
 use std::fmt::Display;
 use std::fmt::Error;
 use std::fmt::Formatter;
+use std::iter::once;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -30,6 +31,7 @@ use std::time::Instant;
 
 use clap::ArgMatches;
 use constellation_auth::authn::AuthNMsgRecv;
+use constellation_auth::authn::PassthruMsgAuthN;
 use constellation_auth::authn::TestAuthN;
 use constellation_channels::config::CompoundFarEndpoint;
 use constellation_channels::far::compound::CompoundFarChannel;
@@ -49,22 +51,36 @@ use constellation_client::component::multicast::MulticastClientComponent;
 use constellation_client::component::multicast::TestCred;
 use constellation_client::session::ClientSessionCleanup;
 use constellation_client::session::MulticastClientSession;
+use constellation_common::codec::Codec;
 use constellation_common::error::MutexPoison;
+use constellation_common::error::ScopedError;
+use constellation_common::hashid::SHA3Algo;
+use constellation_common::hashid::SHA3ID;
 use constellation_common::ids::AscendingCount;
+use constellation_common::ids::IDGen;
 use constellation_common::net::IPEndpointAddr;
-use constellation_common::net::SharedMsgs;
 use constellation_common::shutdown::ShutdownFlag;
 use constellation_common::sync::Notify;
 use constellation_common::version::FullVersion;
 use constellation_common::version::Version;
 use constellation_common::version::VersionSuffix;
 use constellation_component_common::config::PartiesConfig;
+use constellation_component_common::xact::XactBatch;
+use constellation_component_common::xact::XactBatchCodec;
 use constellation_component_common::PartyStreamIdx;
 use constellation_standalone::Standalone;
 use constellation_standalone::StandaloneApp;
-use constellation_streams::large_obj::LargeObjFrag;
-use constellation_streams::large_obj::LargeObjMsg;
-use constellation_streams::large_obj::LargeObjMsgCodec;
+use constellation_streams::config::LargeObjProtoConfig;
+use constellation_streams::frags::Frags;
+use constellation_streams::frags::OutboundFrags;
+use constellation_streams::large_obj::LargeObjID;
+use constellation_streams::large_obj::LargeObjMsgs;
+use constellation_streams::large_obj::LargeObjProto;
+use constellation_streams::large_obj::LargeObjProtoAddOutboundError;
+use constellation_streams::large_obj::LargeObjProtoCreateError;
+use constellation_streams::large_obj::LargeObjSender;
+use constellation_streams::multicast::StreamMulticasterFrags;
+use log::debug;
 use log::error;
 use log::info;
 use log::warn;
@@ -77,7 +93,9 @@ pub struct CmdlineSession {
 
 #[derive(Clone)]
 pub struct CmdlineSessionMsgs {
-    parties: Arc<RwLock<Vec<PartyStreamIdx>>>
+    hash: SHA3Algo,
+    when: Instant,
+    count: u64
 }
 
 #[derive(Clone)]
@@ -108,11 +126,45 @@ pub struct StandaloneCtx {
 
 pub struct StandaloneCmdline {
     component: CompoundMulticastClientComponent<
-        StandaloneCtx,
+        XactBatch<SHA3ID>,
+        XactBatch<SHA3ID>,
+        PassthruMsgAuthN<XactBatch<SHA3ID>, String>,
+        XactBatchCodec<SHA3Algo>,
+        SHA3Algo,
+        AscendingCount<LargeObjID>,
+        CmdlineSessionMsgs,
+        CmdlineSessionRecv,
         CmdlineSession,
-        AscendingCount,
-        LargeObjMsgCodec
+        AscendingCount<u128>,
+        StandaloneCtx
     >
+}
+
+impl Default for CmdlineSessionRecv {
+    #[inline]
+    fn default() -> Self {
+        CmdlineSessionRecv
+    }
+}
+
+impl CmdlineSessionMsgs {
+    #[inline]
+    fn new(hash: SHA3Algo) -> Self {
+        CmdlineSessionMsgs {
+            when: Instant::now(),
+            hash: hash,
+            count: 0
+        }
+    }
+}
+
+impl CmdlineSession {
+    #[inline]
+    fn new() -> Self {
+        CmdlineSession {
+            parties: Arc::new(RwLock::new(Vec::new()))
+        }
+    }
 }
 
 impl NSNameCachesCtx for StandaloneCtx {
@@ -144,41 +196,55 @@ impl
     }
 }
 
-impl SharedMsgs<PartyStreamIdx, LargeObjMsg> for CmdlineSessionMsgs {
-    /// Type of errors that can occur when collecting messages.
-    type MsgsError = MutexPoison;
+impl LargeObjMsgs<SHA3Algo, XactBatch<SHA3ID>> for CmdlineSessionMsgs {
+    type AddMsgsError<Encode>
+        = LargeObjProtoAddOutboundError<SHA3ID, Encode>
+    where
+        Encode: Display + ScopedError;
 
-    /// Collect and report outbound messages.
-    ///
-    /// This will provide the outbound messages, if there are any, as
-    /// well as the time at which to check again for new messages.
-    fn msgs(
-        &mut self
-    ) -> Result<
-        (
-            Option<Vec<(Vec<PartyStreamIdx>, Vec<LargeObjMsg>)>>,
-            Option<Instant>
-        ),
-        Self::MsgsError
-    > {
-        let guard = self.parties.read().map_err(|_| MutexPoison)?;
+    fn add_msgs<WrapperCodec, F>(
+        &mut self,
+        sender: &mut LargeObjSender<
+            SHA3Algo,
+            XactBatch<SHA3ID>,
+            WrapperCodec,
+            F
+        >
+    ) -> Result<Option<Instant>, Self::AddMsgsError<WrapperCodec::EncodeError>>
+    where
+        WrapperCodec: Clone + Codec<XactBatch<SHA3ID>>,
+        WrapperCodec::Param: Default,
+        F: Frags {
         let now = Instant::now();
-        let when = now + Duration::from_secs(1);
-        let msg = LargeObjMsg::Finish {
-            id: 0x0123456789abcdef
-        };
 
-        Ok((Some(vec![(guard.clone(), vec![msg])]), Some(when)))
+        if now >= self.when {
+            debug!(target: "cmdline-msgs",
+                   "generating outgoing batch, seqnum {}",
+                   self.count);
+
+            let batch = XactBatch::create(
+                &self.hash,
+                self.count,
+                once(vec![0x33; 10000])
+            );
+
+            sender.add_outbound(&batch)?;
+            self.count += 1;
+
+            self.when = now + Duration::from_secs(5);
+        }
+
+        Ok(Some(self.when))
     }
 }
 
-impl AuthNMsgRecv<String, LargeObjMsg> for CmdlineSessionRecv {
+impl AuthNMsgRecv<String, XactBatch<SHA3ID>> for CmdlineSessionRecv {
     type RecvError = Infallible;
 
     fn recv_auth_msg(
         &mut self,
         prin: &String,
-        msg: LargeObjMsg
+        msg: XactBatch<SHA3ID>
     ) -> Result<(), Self::RecvError> {
         info!(target: "cmdline-recv",
               "received message from {}: {:?}",
@@ -188,28 +254,62 @@ impl AuthNMsgRecv<String, LargeObjMsg> for CmdlineSessionRecv {
     }
 }
 
-impl MulticastClientSession<String> for CmdlineSession {
+impl
+    MulticastClientSession<
+        SHA3Algo,
+        XactBatch<SHA3ID>,
+        XactBatch<SHA3ID>,
+        PassthruMsgAuthN<XactBatch<SHA3ID>, String>,
+        XactBatchCodec<SHA3Algo>,
+        AscendingCount<LargeObjID>,
+        CmdlineSessionMsgs,
+        CmdlineSessionRecv
+    > for CmdlineSession
+{
     type Cleanup = CmdlineSessionCleanup;
-    type Config = ();
-    type CreateError = Infallible;
-    type Msg = LargeObjMsg;
-    type Msgs = CmdlineSessionMsgs;
-    type Recv = CmdlineSessionRecv;
+    type Config = LargeObjProtoConfig<(), ()>;
+    type CreateError = LargeObjProtoCreateError<
+        <XactBatchCodec<SHA3Algo> as Codec<XactBatch<SHA3ID>>>::CreateError
+    >;
     type StartError = MutexPoison;
 
     fn create(
-        _config: Self::Config
-    ) -> Result<(Self, Self::Msgs, Notify, Self::Recv), Self::CreateError> {
-        let parties = Arc::new(RwLock::new(Vec::new()));
+        config: Self::Config
+    ) -> Result<
+        (
+            Self,
+            Notify,
+            LargeObjProto<
+                SHA3Algo,
+                XactBatch<SHA3ID>,
+                XactBatch<SHA3ID>,
+                PassthruMsgAuthN<XactBatch<SHA3ID>, String>,
+                PartyStreamIdx,
+                XactBatchCodec<SHA3Algo>,
+                AscendingCount<LargeObjID>,
+                CmdlineSessionMsgs,
+                CmdlineSessionRecv,
+                StreamMulticasterFrags<PartyStreamIdx, OutboundFrags>
+            >
+        ),
+        Self::CreateError
+    > {
+        let hash = SHA3Algo::default();
+        let authn = PassthruMsgAuthN::default();
+        let msgs = CmdlineSessionMsgs::new(hash.clone());
+        let recv = CmdlineSessionRecv::default();
+        let notify = Notify::new();
+        let proto = LargeObjProto::create(
+            config,
+            notify.clone(),
+            recv,
+            msgs,
+            authn,
+            hash
+        )?;
+        let session = CmdlineSession::new();
 
-        Ok((
-            CmdlineSession {
-                parties: parties.clone()
-            },
-            CmdlineSessionMsgs { parties: parties },
-            Notify::new(),
-            CmdlineSessionRecv
-        ))
+        Ok((session, notify, proto))
     }
 
     fn start<I>(
