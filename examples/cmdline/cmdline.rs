@@ -57,7 +57,6 @@ use constellation_common::error::ScopedError;
 use constellation_common::hashid::SHA3Algo;
 use constellation_common::hashid::SHA3ID;
 use constellation_common::ids::AscendingCount;
-use constellation_common::ids::IDGen;
 use constellation_common::net::IPEndpointAddr;
 use constellation_common::shutdown::ShutdownFlag;
 use constellation_common::sync::Notify;
@@ -84,6 +83,9 @@ use log::debug;
 use log::error;
 use log::info;
 use log::warn;
+use uuid::Uuid;
+
+const TEST_SERVICE_NAME: &str = "org.constellation.test";
 
 use crate::config::CmdlineConfig;
 
@@ -95,6 +97,7 @@ pub struct CmdlineSession {
 pub struct CmdlineSessionMsgs {
     hash: SHA3Algo,
     when: Instant,
+    uuid: Uuid,
     count: u64
 }
 
@@ -150,8 +153,16 @@ impl Default for CmdlineSessionRecv {
 impl CmdlineSessionMsgs {
     #[inline]
     fn new(hash: SHA3Algo) -> Self {
+        let uuid = Uuid::new_v5(&Uuid::NAMESPACE_DNS,
+                                TEST_SERVICE_NAME.as_bytes());
+
+        debug!(target: "cmdline-msgs",
+               "service UUID: {}",
+               uuid);
+
         CmdlineSessionMsgs {
             when: Instant::now(),
+            uuid: uuid,
             hash: hash,
             count: 0
         }
