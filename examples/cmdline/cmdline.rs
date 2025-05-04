@@ -21,7 +21,6 @@ use std::convert::TryFrom;
 use std::fmt::Display;
 use std::fmt::Error;
 use std::fmt::Formatter;
-use std::iter::once;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -52,6 +51,7 @@ use constellation_client::component::multicast::TestCred;
 use constellation_client::session::ClientSessionCleanup;
 use constellation_client::session::MulticastClientSession;
 use constellation_common::codec::Codec;
+use constellation_common::error::ErrorScope;
 use constellation_common::error::MutexPoison;
 use constellation_common::error::ScopedError;
 use constellation_common::hashid::SHA3Algo;
@@ -66,6 +66,9 @@ use constellation_common::version::VersionSuffix;
 use constellation_component_common::config::PartiesConfig;
 use constellation_component_common::xact::XactBatch;
 use constellation_component_common::xact::XactBatchCodec;
+use constellation_component_common::xact::XactEffects;
+use constellation_component_common::xact::XactSealed;
+use constellation_component_common::xact::XactUncommittedReq;
 use constellation_component_common::PartyStreamIdx;
 use constellation_standalone::Standalone;
 use constellation_standalone::StandaloneApp;
@@ -85,9 +88,143 @@ use log::info;
 use log::warn;
 use uuid::Uuid;
 
-const TEST_SERVICE_NAME: &str = "org.constellation.test";
-
 use crate::config::CmdlineConfig;
+
+
+#[derive(Clone)]
+enum CmdlineMode {
+    NoEffects {
+        hard: bool,
+        correct: bool,
+        error: bool
+    },
+    SoftEmptyEffects {
+        correct: bool,
+        error: bool
+    },
+    Effects {
+        hard: bool,
+        correct: bool,
+        error: bool
+    },
+}
+
+impl CmdlineMode {
+    fn req(
+        &self,
+        uuid: &Uuid,
+        version: &Version
+    ) -> XactUncommittedReq<u128, TestPayload, TestEffects> {
+        match self {
+            CmdlineMode::NoEffects { hard, correct, error } => {
+                let res = if *error {
+                    Err(TestError {
+                        err: String::from("test error")
+                    })
+                } else {
+                    Ok(TestResult {
+                        val: vec![0x10]
+                    })
+                };
+                let payload = if *correct {
+                    TestPayload {
+                        effects: vec![],
+                        res: res
+                    }
+                } else {
+                    TestPayload {
+                        effects: vec![0x01],
+                        res: res
+                    }
+                };
+                let effects = if *hard {
+                    XactEffects::HardNone {
+                        when: None
+                    }
+                } else {
+                    XactEffects::SoftNone
+                };
+
+                XactUncommittedReq::new(
+                    uuid.clone(),
+                    version.clone(),
+                    payload,
+                    effects,
+                )
+            },
+            CmdlineMode::Effects { hard, correct, error } => {
+                let res = if *error {
+                    Err(TestError {
+                        err: String::from("test error")
+                    })
+                } else {
+                    Ok(TestResult {
+                        val: vec![0x10]
+                    })
+                };
+                let payload = if *correct {
+                    TestPayload {
+                        effects: vec![0x01],
+                        res: res
+                    }
+                } else {
+                    TestPayload {
+                        effects: vec![0x02],
+                        res: res
+                    }
+                };
+                let effects = XactEffects::Effects {
+                    effects: TestEffects {
+                        effects: vec![0x01]
+                    },
+                    hard: *hard
+                };
+
+                XactUncommittedReq::new(
+                    uuid.clone(),
+                    version.clone(),
+                    payload,
+                    effects,
+                )
+            },
+            CmdlineMode::SoftEmptyEffects { correct, error } => {
+                let res = if *error {
+                    Err(TestError {
+                        err: String::from("test error")
+                    })
+                } else {
+                    Ok(TestResult {
+                        val: vec![0x10]
+                    })
+                };
+                let payload = if *correct {
+                    TestPayload {
+                        effects: vec![0x01],
+                        res: res
+                    }
+                } else {
+                    TestPayload {
+                        effects: vec![0x02],
+                        res: res
+                    }
+                };
+                let effects = XactEffects::Effects {
+                    effects: TestEffects {
+                        effects: vec![]
+                    },
+                    hard: false
+                };
+
+                XactUncommittedReq::new(
+                    uuid.clone(),
+                    version.clone(),
+                    payload,
+                    effects,
+                )
+            }
+        }
+    }
+}
 
 pub struct CmdlineSession {
     parties: Arc<RwLock<Vec<PartyStreamIdx>>>
@@ -95,6 +232,8 @@ pub struct CmdlineSession {
 
 #[derive(Clone)]
 pub struct CmdlineSessionMsgs {
+    mode: CmdlineMode,
+    version: Version,
     hash: SHA3Algo,
     when: Instant,
     uuid: Uuid,
@@ -129,10 +268,10 @@ pub struct StandaloneCtx {
 
 pub struct StandaloneCmdline {
     component: CompoundMulticastClientComponent<
-        XactBatch<SHA3ID>,
-        XactBatch<SHA3ID>,
-        PassthruMsgAuthN<XactBatch<SHA3ID>, String>,
-        XactBatchCodec<SHA3Algo>,
+        TestBatch,
+        TestBatch,
+        PassthruMsgAuthN<TestBatch, String>,
+        TestBatchCodec,
         SHA3Algo,
         AscendingCount<LargeObjID>,
         CmdlineSessionMsgs,
@@ -152,9 +291,14 @@ impl Default for CmdlineSessionRecv {
 
 impl CmdlineSessionMsgs {
     #[inline]
-    fn new(hash: SHA3Algo) -> Self {
-        let uuid = Uuid::new_v5(&Uuid::NAMESPACE_DNS,
-                                TEST_SERVICE_NAME.as_bytes());
+    fn new(
+        mode: CmdlineMode,
+        hash: SHA3Algo
+    ) -> Self {
+        let uuid = Uuid::new_v5(
+            &Uuid::NAMESPACE_DNS,
+            TEST_SERVICE_NAME.as_bytes()
+        );
 
         debug!(target: "cmdline-msgs",
                "service UUID: {}",
@@ -162,6 +306,8 @@ impl CmdlineSessionMsgs {
 
         CmdlineSessionMsgs {
             when: Instant::now(),
+            version: TEST_VERSION,
+            mode: mode,
             uuid: uuid,
             hash: hash,
             count: 0
@@ -207,7 +353,7 @@ impl
     }
 }
 
-impl LargeObjMsgs<SHA3Algo, XactBatch<SHA3ID>> for CmdlineSessionMsgs {
+impl LargeObjMsgs<SHA3Algo, TestBatch> for CmdlineSessionMsgs {
     type AddMsgsError<Encode>
         = LargeObjProtoAddOutboundError<SHA3ID, Encode>
     where
@@ -217,13 +363,13 @@ impl LargeObjMsgs<SHA3Algo, XactBatch<SHA3ID>> for CmdlineSessionMsgs {
         &mut self,
         sender: &mut LargeObjSender<
             SHA3Algo,
-            XactBatch<SHA3ID>,
+            TestBatch,
             WrapperCodec,
             F
         >
     ) -> Result<Option<Instant>, Self::AddMsgsError<WrapperCodec::EncodeError>>
     where
-        WrapperCodec: Clone + Codec<XactBatch<SHA3ID>>,
+        WrapperCodec: Clone + Codec<TestBatch>,
         WrapperCodec::Param: Default,
         F: Frags {
         let now = Instant::now();
@@ -233,11 +379,9 @@ impl LargeObjMsgs<SHA3Algo, XactBatch<SHA3ID>> for CmdlineSessionMsgs {
                    "generating outgoing batch, seqnum {}",
                    self.count);
 
-            let batch = XactBatch::create(
-                &self.hash,
-                self.count,
-                once(vec![0x33; 10000])
-            );
+            let req = self.mode.req(&self.uuid, &self.version);
+            let sealed = XactSealed::new(TestSeal, req);
+            let batch = XactBatch::new(vec![], vec![sealed], vec![], vec![]);
 
             sender.add_outbound(&batch)?;
             self.count += 1;
@@ -249,17 +393,44 @@ impl LargeObjMsgs<SHA3Algo, XactBatch<SHA3ID>> for CmdlineSessionMsgs {
     }
 }
 
-impl AuthNMsgRecv<String, XactBatch<SHA3ID>> for CmdlineSessionRecv {
+impl AuthNMsgRecv<String, TestBatch> for CmdlineSessionRecv {
     type RecvError = Infallible;
 
     fn recv_auth_msg(
         &mut self,
         prin: &String,
-        msg: XactBatch<SHA3ID>
+        msg: TestBatch
     ) -> Result<(), Self::RecvError> {
         info!(target: "cmdline-recv",
-              "received message from {}: {:?}",
+              "received batch from {}: {:?}",
               prin, msg);
+
+        for _ in msg.uncommitted() {
+            warn!(target: "cmdline-recv",
+                  "discarding uncommitted request")
+        }
+
+        for _ in msg.committed() {
+            warn!(target: "cmdline-recv",
+                  "discarding committed round")
+        }
+
+        for res in msg.results() {
+            match res.result() {
+                Ok(val) => info!(target: "cmdline-recv",
+                                 "received result for {}: {}",
+                                 res.hash(), val),
+                Err(err) => info!(target: "cmdline-recv",
+                                 "received error for {}: {}",
+                                 res.hash(), err),
+            }
+        }
+
+        for notify in msg.notifies() {
+            info!(target: "cmdline-recv",
+                  "notification for {}: {}",
+                  notify.hash(), notify.state())
+        }
 
         Ok(())
     }
@@ -268,19 +439,19 @@ impl AuthNMsgRecv<String, XactBatch<SHA3ID>> for CmdlineSessionRecv {
 impl
     MulticastClientSession<
         SHA3Algo,
-        XactBatch<SHA3ID>,
-        XactBatch<SHA3ID>,
-        PassthruMsgAuthN<XactBatch<SHA3ID>, String>,
-        XactBatchCodec<SHA3Algo>,
+        TestBatch,
+        TestBatch,
+        PassthruMsgAuthN<TestBatch, String>,
+        TestBatchCodec,
         AscendingCount<LargeObjID>,
         CmdlineSessionMsgs,
         CmdlineSessionRecv
     > for CmdlineSession
 {
     type Cleanup = CmdlineSessionCleanup;
-    type Config = LargeObjProtoConfig<(), ()>;
+    type Config = LargeObjProtoConfig<((), (), (), (), ()), ()>;
     type CreateError = LargeObjProtoCreateError<
-        <XactBatchCodec<SHA3Algo> as Codec<XactBatch<SHA3ID>>>::CreateError
+        <TestBatchCodec as Codec<TestBatch>>::CreateError
     >;
     type StartError = MutexPoison;
 
@@ -292,11 +463,11 @@ impl
             Notify,
             LargeObjProto<
                 SHA3Algo,
-                XactBatch<SHA3ID>,
-                XactBatch<SHA3ID>,
-                PassthruMsgAuthN<XactBatch<SHA3ID>, String>,
+                TestBatch,
+                TestBatch,
+                PassthruMsgAuthN<TestBatch, String>,
                 PartyStreamIdx,
-                XactBatchCodec<SHA3Algo>,
+                TestBatchCodec,
                 AscendingCount<LargeObjID>,
                 CmdlineSessionMsgs,
                 CmdlineSessionRecv,
@@ -307,7 +478,12 @@ impl
     > {
         let hash = SHA3Algo::default();
         let authn = PassthruMsgAuthN::default();
-        let msgs = CmdlineSessionMsgs::new(hash.clone());
+        let msgs = CmdlineSessionMsgs::new(
+            CmdlineMode::NoEffects {
+                hard: true, correct: true, error: false
+            },
+            hash.clone()
+        );
         let recv = CmdlineSessionRecv::default();
         let notify = Notify::new();
         let proto = LargeObjProto::create(
@@ -514,5 +690,367 @@ impl Display for CmdlineSessionError {
                 write!(f, "stream parties skipped an index")
             }
         }
+    }
+}
+
+
+
+
+const TEST_SERVICE_NAME: &str = "org.constellation.test";
+const TEST_VERSION: Version = Version::new(0, 0, 0);
+
+#[derive(Clone, Debug)]
+pub struct TestEffects {
+    effects: Vec<u8>
+}
+
+#[derive(Clone, Debug)]
+pub struct TestPayload {
+    effects: Vec<u8>,
+    res: Result<TestResult, TestError>
+}
+
+#[derive(Clone, Debug)]
+pub struct TestResult {
+    val: Vec<u8>
+}
+
+#[derive(Clone, Debug)]
+pub struct TestError {
+    err: String
+}
+
+#[derive(Clone, Debug)]
+pub struct TestSeal;
+
+#[derive(Clone)]
+pub struct TestEffectsCodec;
+
+#[derive(Clone)]
+pub struct TestPayloadCodec;
+
+#[derive(Clone)]
+pub struct TestResultCodec;
+
+#[derive(Clone)]
+pub struct TestErrorCodec;
+
+#[derive(Clone)]
+pub struct TestSealCodec;
+
+pub struct TestStringError;
+
+type TestBatch = XactBatch<u128, SHA3ID, TestSeal, TestPayload,
+                           TestEffects, TestResult, TestError>;
+type TestBatchCodec =
+    XactBatchCodec<u128, SHA3Algo, TestSeal, TestPayload, TestEffects,
+                   TestResult, TestError, TestSealCodec, TestPayloadCodec,
+                   TestEffectsCodec, TestResultCodec, TestErrorCodec>;
+
+impl Codec<TestSeal> for TestSealCodec {
+    type CreateError = Infallible;
+    type EncodeError = Infallible;
+    type DecodeError = Infallible;
+    type Param = ();
+
+    #[inline]
+    fn create(_param: ()) -> Result<Self, Infallible> {
+        Ok(TestSealCodec)
+    }
+
+    #[inline]
+    fn buf_size(
+        &self,
+        _val: &TestSeal
+    ) -> usize {
+        0
+    }
+
+    #[inline]
+    fn encode(
+        &mut self,
+        _val: &TestSeal,
+        _buf: &mut [u8]
+    ) -> Result<usize, Self::EncodeError> {
+        Ok(0)
+    }
+
+    #[inline]
+    fn decode(
+        &mut self,
+        _buf: &[u8]
+    ) -> Result<(TestSeal, usize), Self::DecodeError> {
+        Ok((TestSeal, 0))
+    }
+}
+
+impl Codec<TestEffects> for TestEffectsCodec {
+    type CreateError = Infallible;
+    type EncodeError = Infallible;
+    type DecodeError = Infallible;
+    type Param = ();
+
+    #[inline]
+    fn create(_param: ()) -> Result<Self, Infallible> {
+        Ok(TestEffectsCodec)
+    }
+
+    #[inline]
+    fn buf_size(
+        &self,
+        val: &TestEffects
+    ) -> usize {
+        val.effects.len() + 1
+    }
+
+    #[inline]
+    fn encode(
+        &mut self,
+        val: &TestEffects,
+        buf: &mut [u8]
+    ) -> Result<usize, Self::EncodeError> {
+        let len = val.effects.len();
+
+        buf[0] = len as u8;
+        buf[1..len + 1].copy_from_slice(&val.effects[..]);
+
+        Ok(len + 1)
+    }
+
+    #[inline]
+    fn decode(
+        &mut self,
+        buf: &[u8]
+    ) -> Result<(TestEffects, usize), Self::DecodeError> {
+        let len = buf[0] as usize;
+        let effects = buf[1..len + 1].to_vec();
+
+        Ok((TestEffects {
+            effects: effects
+        }, len + 1))
+    }
+}
+
+impl Codec<TestResult> for TestResultCodec {
+    type CreateError = Infallible;
+    type EncodeError = Infallible;
+    type DecodeError = Infallible;
+    type Param = ();
+
+    #[inline]
+    fn create(_param: ()) -> Result<Self, Infallible> {
+        Ok(TestResultCodec)
+    }
+
+    #[inline]
+    fn buf_size(
+        &self,
+        val: &TestResult
+    ) -> usize {
+        val.val.len() + 1
+    }
+
+    #[inline]
+    fn encode(
+        &mut self,
+        val: &TestResult,
+        buf: &mut [u8]
+    ) -> Result<usize, Self::EncodeError> {
+        let len = val.val.len();
+
+        buf[0] = len as u8;
+        buf[1..len + 1].copy_from_slice(&val.val[..]);
+
+        Ok(len + 1)
+    }
+
+    #[inline]
+    fn decode(
+        &mut self,
+        buf: &[u8]
+    ) -> Result<(TestResult, usize), Self::DecodeError> {
+        let len = buf[0] as usize;
+        let val = buf[1..len + 1].to_vec();
+
+        Ok((TestResult {
+            val: val
+        }, len + 1))
+    }
+}
+
+impl Codec<TestError> for TestErrorCodec {
+    type CreateError = Infallible;
+    type EncodeError = Infallible;
+    type DecodeError = TestStringError;
+    type Param = ();
+
+    #[inline]
+    fn create(_param: ()) -> Result<Self, Infallible> {
+        Ok(TestErrorCodec)
+    }
+
+    #[inline]
+    fn buf_size(
+        &self,
+        val: &TestError
+    ) -> usize {
+        val.err.as_bytes().len() + 1
+    }
+
+    #[inline]
+    fn encode(
+        &mut self,
+        val: &TestError,
+        buf: &mut [u8]
+    ) -> Result<usize, Self::EncodeError> {
+        let bytes = val.err.as_bytes();
+        let len = bytes.len();
+
+        buf[0] = len as u8;
+        buf[1..len + 1].copy_from_slice(&bytes[..]);
+
+        Ok(len + 1)
+    }
+
+    #[inline]
+    fn decode(
+        &mut self,
+        buf: &[u8]
+    ) -> Result<(TestError, usize), Self::DecodeError> {
+        let len = buf[0] as usize;
+        let val = buf[1..len + 1].to_vec();
+        let err = String::from_utf8(val)
+            .map_err(|_| TestStringError)?;
+
+        Ok((TestError {
+            err: err
+        }, len + 1))
+    }
+}
+
+impl Codec<TestPayload> for TestPayloadCodec {
+    type CreateError = Infallible;
+    type EncodeError = Infallible;
+    type DecodeError = <TestErrorCodec as Codec<TestError>>::DecodeError;
+    type Param = ();
+
+    #[inline]
+    fn create(_param: ()) -> Result<Self, Infallible> {
+        Ok(TestPayloadCodec)
+    }
+
+    #[inline]
+    fn buf_size(
+        &self,
+        val: &TestPayload
+    ) -> usize {
+        let effects = val.effects.len() + 1;
+        let result = match &val.res {
+            Ok(res) => TestResultCodec.buf_size(res) + 1,
+            Err(err) => TestErrorCodec.buf_size(err) + 1,
+        };
+
+        effects + result
+    }
+
+    #[inline]
+    fn encode(
+        &mut self,
+        val: &TestPayload,
+        buf: &mut [u8]
+    ) -> Result<usize, Self::EncodeError> {
+        let effects_len = val.effects.len();
+
+        buf[0] = effects_len as u8;
+        buf[1..effects_len + 1].copy_from_slice(&val.effects[..]);
+
+        let res_len = match &val.res {
+            Ok(res) => {
+                buf[effects_len + 1] = 0;
+
+                let Ok(len) = TestResultCodec
+                    .encode(res, &mut buf[effects_len + 2..]);
+
+                len + 1
+            },
+            Err(err) =>  {
+                buf[effects_len + 1] = 1;
+
+                let Ok(len) = TestErrorCodec
+                    .encode(err, &mut buf[effects_len + 2..]);
+
+                len + 1
+            }
+        };
+
+        Ok(effects_len + res_len + 1)
+    }
+
+    #[inline]
+    fn decode(
+        &mut self,
+        buf: &[u8]
+    ) -> Result<(TestPayload, usize), Self::DecodeError> {
+        let effects_len = buf[0] as usize;
+        let effects = buf[1..effects_len + 1].to_vec();
+
+        let (res, res_len) = if buf[effects_len + 1] == 0 {
+            let Ok((res, len)) =
+                TestResultCodec.decode(&buf[effects_len + 2..]);
+
+            (Ok(res), len)
+        } else {
+            let (err, len) =
+                TestErrorCodec.decode(&buf[effects_len + 2..])?;
+
+            (Err(err), len)
+        };
+
+        Ok((TestPayload {
+            effects: effects,
+            res: res
+        }, effects_len + res_len + 2))
+    }
+}
+
+impl ScopedError for TestStringError {
+    #[inline]
+    fn scope(
+        &self,
+    ) -> ErrorScope {
+        ErrorScope::Unrecoverable
+    }
+}
+
+impl Display for TestResult {
+    fn fmt(
+        &self,
+        f: &mut Formatter<'_>
+    ) -> Result<(), Error> {
+        write!(f, "result: ")?;
+
+        for byte in self.val.iter() {
+            write!(f, "{:02x}", byte)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Display for TestError {
+    fn fmt(
+        &self,
+        f: &mut Formatter<'_>
+    ) -> Result<(), Error> {
+        write!(f, "{}", self)
+    }
+}
+
+impl Display for TestStringError {
+    fn fmt(
+        &self,
+        f: &mut Formatter<'_>
+    ) -> Result<(), Error> {
+        write!(f, "bad UTF-8 data")
     }
 }

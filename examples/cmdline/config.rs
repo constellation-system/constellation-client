@@ -62,7 +62,7 @@ pub struct CmdlineConfig {
         CompoundFarEndpoint
     >,
     #[serde(default)]
-    session: LargeObjProtoConfig<(), ()>
+    session: LargeObjProtoConfig<((), (), (), (), ()), ()>
 }
 
 impl CmdlineConfig {
@@ -81,7 +81,7 @@ impl CmdlineConfig {
             <AscendingCount<LargeObjID> as IDGen>::Config,
             CompoundFarEndpoint
         >,
-        LargeObjProtoConfig<(), ()>
+        LargeObjProtoConfig<((), (), (), (), ()), ()>
     ){
         (
             self.name_caches,

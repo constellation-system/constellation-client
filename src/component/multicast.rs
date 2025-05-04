@@ -19,9 +19,9 @@
 use std::convert::Infallible;
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::fmt::Error;
 use std::fmt::Formatter;
 use std::hash::Hash;
+use std::io::Error;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -260,6 +260,7 @@ pub enum MulticastClientComponentRunError<Session, Multicast, Start> {
     Session { err: Session },
     Multicast { err: Multicast },
     Start { err: Start },
+    IO { err: Error },
     SkippedIdx
 }
 
@@ -523,7 +524,9 @@ where
         debug!(target: "multicast-client-component",
                "starting multicaster");
 
-        let multicast_cleanup = multicast.start();
+        let multicast_cleanup = multicast.start().map_err(|err| {
+            MulticastClientComponentRunError::IO { err: err }
+        })?;
 
         Ok(MulticastClientComponentCleanup {
             shutdown: shutdown,
@@ -560,11 +563,13 @@ where
     fn fmt(
         &self,
         f: &mut Formatter<'_>
-    ) -> Result<(), Error> {
+    ) -> Result<(), std::fmt::Error> {
         match self {
             MulticastClientComponentRunError::Session { err } => err.fmt(f),
             MulticastClientComponentRunError::Multicast { err } => err.fmt(f),
             MulticastClientComponentRunError::Start { err } => err.fmt(f),
+            MulticastClientComponentRunError::IO { err } =>
+                write!(f, "{}", err),
             MulticastClientComponentRunError::SkippedIdx => {
                 write!(f, "stream parties skipped an index")
             }
@@ -630,7 +635,7 @@ impl Display for TestCred {
     fn fmt(
         &self,
         f: &mut Formatter<'_>
-    ) -> Result<(), Error> {
+    ) -> Result<(), std::fmt::Error> {
         match self {
             TestCred::IP { addr } => write!(f, "ip://{}", addr),
             TestCred::Unix { addr } => write!(f, "unix://{}", addr)

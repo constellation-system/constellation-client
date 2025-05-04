@@ -61,7 +61,7 @@ pub struct ProcessorConfig {
         CompoundFarEndpoint
     >,
     #[serde(default)]
-    session: LargeObjProtoConfig<(), ()>
+    session: LargeObjProtoConfig<((), (), (), (), ()), ()>
 }
 
 impl ProcessorConfig {
@@ -79,7 +79,7 @@ impl ProcessorConfig {
             <AscendingCount<LargeObjID> as IDGen>::Config,
             CompoundFarEndpoint
         >,
-        LargeObjProtoConfig<(), ()>
+        LargeObjProtoConfig<((), (), (), (), ()), ()>
     ){
         (
             self.name_caches,
