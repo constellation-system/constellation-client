@@ -67,7 +67,9 @@ use constellation_component_common::xact::XactCommittedReq;
 use constellation_component_common::xact::XactCommittedRound;
 use constellation_component_common::xact::XactEffects;
 use constellation_component_common::xact::XactError;
-use constellation_component_common::xact::XactResult;
+use constellation_component_common::xact::XactLinPoint;
+use constellation_component_common::xact::XactNotify;
+use constellation_component_common::xact::XactNotifyState;
 use constellation_component_common::xact::XactSealed;
 use constellation_component_common::xact::XactUncommittedHashReq;
 use constellation_standalone::Standalone;
@@ -93,14 +95,15 @@ pub struct ProcessorSession;
 
 #[derive(Clone)]
 pub struct ProcessorSessionMsgs {
-    pending: Arc<Mutex<Vec<XactResult<SHA3ID, TestResult, TestError>>>>
+    pending: Arc<Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>>
 }
 
 #[derive(Clone)]
 pub struct ProcessorSessionRecv {
     class: Uuid,
     version: Version,
-    pending: Arc<Mutex<Vec<XactResult<SHA3ID, TestResult, TestError>>>>
+    pending: Arc<Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>>,
+    when: XactLinPoint<u128>
 }
 
 pub struct ProcessorSessionCleanup;
@@ -177,7 +180,7 @@ impl
 impl ProcessorSessionMsgs {
     #[inline]
     fn new(
-        pending: Arc<Mutex<Vec<XactResult<SHA3ID, TestResult, TestError>>>>
+        pending: Arc<Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>>
     ) -> Self {
         ProcessorSessionMsgs {
             pending: pending
@@ -190,12 +193,13 @@ impl ProcessorSessionRecv {
     fn new(
         class: Uuid,
         version: Version,
-        pending: Arc<Mutex<Vec<XactResult<SHA3ID, TestResult, TestError>>>>
+        pending: Arc<Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>>
     ) -> Self {
         ProcessorSessionRecv {
             class: class,
             version: version,
-            pending: pending
+            pending: pending,
+            when: XactLinPoint::new(0, 0)
         }
     }
 }
@@ -203,7 +207,7 @@ impl ProcessorSessionRecv {
 impl ProcessorSessionMsgs {
     fn get_msgs(
         &self
-    ) -> Result<Vec<XactResult<SHA3ID, TestResult, TestError>>,
+    ) -> Result<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>,
                 MutexPoison> {
         let mut guard = self
             .pending
@@ -234,7 +238,7 @@ impl LargeObjMsgs<SHA3Algo, TestBatch> for ProcessorSessionMsgs {
         WrapperCodec::Param: Default,
         F: Frags {
         let msgs = self.get_msgs()?;
-        let batch = XactHashBatch::new(vec![], vec![], msgs, vec![]);
+        let batch = XactHashBatch::new(vec![], vec![], msgs);
 
         sender.add_outbound(&batch)
             .map_err(|err| WithMutexPoison::Inner { error: err })?;
@@ -249,7 +253,7 @@ impl ProcessorSessionRecv {
         req: XactSealed<TestSeal,
                         XactUncommittedHashReq<u128, SHA3ID, TestPayload,
                                                TestEffects>>
-    ) -> XactResult<SHA3ID, TestResult, TestError> {
+    ) -> XactNotify<u128, SHA3ID, TestResult, TestError> {
         let (_, req) = req.take();
         let (class, version, instance, hash, effects, payload) = req.take();
 
@@ -257,7 +261,7 @@ impl ProcessorSessionRecv {
             Err(XactError::UnknownClass)
         } else if version != self.version {
             Err(XactError::UnknownVersion)
-        } else if instance.is_some() {
+        } else if instance != 0 {
             Err(XactError::UnknownInstance)
         } else {
             match effects {
@@ -274,21 +278,37 @@ impl ProcessorSessionRecv {
             }
         };
 
-        XactResult::new(hash, res)
+        match res {
+            Ok(res) => {
+                let state = XactNotifyState::Success {
+                    result: Some(res),
+                    when: self.when.clone()
+                };
+
+                XactNotify::new(hash, state)
+            },
+            Err(err) => {
+                let state = XactNotifyState::Error {
+                    error: Some(err),
+                };
+
+                XactNotify::new(hash, state)
+            }
+        }
     }
 
     fn run_committed(
         &self,
         hash: SHA3ID,
         req: XactCommittedReq<TestPayload, TestEffects>,
-    ) -> XactResult<SHA3ID, TestResult, TestError> {
+    ) -> XactNotify<u128, SHA3ID, TestResult, TestError> {
         let (class, version, instance, _, effects, payload) = req.take();
 
         let res = if class != self.class {
             Err(XactError::UnknownClass)
         } else if version != self.version {
             Err(XactError::UnknownVersion)
-        } else if instance.is_some() {
+        } else if instance != 0 {
             Err(XactError::UnknownInstance)
         } else {
             match effects {
@@ -312,7 +332,23 @@ impl ProcessorSessionRecv {
             }
         };
 
-        XactResult::new(hash, res)
+        match res {
+            Ok(res) => {
+                let state = XactNotifyState::Success {
+                    result: Some(res),
+                    when: self.when.clone()
+                };
+
+                XactNotify::new(hash, state)
+            },
+            Err(err) => {
+                let state = XactNotifyState::Error {
+                    error: Some(err),
+                };
+
+                XactNotify::new(hash, state)
+            }
+        }
     }
 
     fn process_uncommitted_reqs(
@@ -368,9 +404,10 @@ impl ProcessorSessionRecv {
                                     .map_err(|_| MutexPoison)?
                                     .push(res)
                             } else {
-                                let res = XactResult::new(
-                                    hash, Err(XactError::HashMismatch)
-                                );
+                                let state = XactNotifyState::Error {
+                                    error: Some(XactError::HashMismatch)
+                                };
+                                let res = XactNotify::new(hash, state);
 
                                 self.pending
                                     .lock()
@@ -422,7 +459,7 @@ impl AuthNMsgRecv<TestCred, TestBatch> for ProcessorSessionRecv {
         prin: &TestCred,
         msg: TestBatch
     ) -> Result<(), Self::RecvError> {
-        let (committed, uncommitted, results, notifies) = msg.take();
+        let (committed, uncommitted, notifies) = msg.take();
 
         info!(target: "cmdline-recv",
               "received batch from {}",
@@ -430,12 +467,6 @@ impl AuthNMsgRecv<TestCred, TestBatch> for ProcessorSessionRecv {
 
         self.process_uncommitted_reqs(uncommitted)?;
         self.process_committed_rounds(committed)?;
-
-        for res in results {
-            warn!(target: "cmdline-recv",
-                  "discarded result for {}",
-                  res.hash())
-        }
 
         for notify in notifies {
             warn!(target: "cmdline-recv",

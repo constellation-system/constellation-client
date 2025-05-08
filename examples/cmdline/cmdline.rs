@@ -148,6 +148,7 @@ impl CmdlineMode {
                 XactUncommittedReq::new(
                     uuid.clone(),
                     version.clone(),
+                    0,
                     payload,
                     effects,
                 )
@@ -183,6 +184,7 @@ impl CmdlineMode {
                 XactUncommittedReq::new(
                     uuid.clone(),
                     version.clone(),
+                    0,
                     payload,
                     effects,
                 )
@@ -218,6 +220,7 @@ impl CmdlineMode {
                 XactUncommittedReq::new(
                     uuid.clone(),
                     version.clone(),
+                    0,
                     payload,
                     effects,
                 )
@@ -381,7 +384,7 @@ impl LargeObjMsgs<SHA3Algo, TestBatch> for CmdlineSessionMsgs {
 
             let req = self.mode.req(&self.uuid, &self.version);
             let sealed = XactSealed::new(TestSeal, req);
-            let batch = XactBatch::new(vec![], vec![sealed], vec![], vec![]);
+            let batch = XactBatch::new(vec![], vec![sealed], vec![]);
 
             sender.add_outbound(&batch)?;
             self.count += 1;
@@ -413,17 +416,6 @@ impl AuthNMsgRecv<String, TestBatch> for CmdlineSessionRecv {
         for _ in msg.committed() {
             warn!(target: "cmdline-recv",
                   "discarding committed round")
-        }
-
-        for res in msg.results() {
-            match res.result() {
-                Ok(val) => info!(target: "cmdline-recv",
-                                 "received result for {}: {}",
-                                 res.hash(), val),
-                Err(err) => info!(target: "cmdline-recv",
-                                 "received error for {}: {}",
-                                 res.hash(), err),
-            }
         }
 
         for notify in msg.notifies() {
