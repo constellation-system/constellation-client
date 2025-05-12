@@ -90,7 +90,6 @@ use uuid::Uuid;
 
 use crate::config::CmdlineConfig;
 
-
 #[derive(Clone)]
 enum CmdlineMode {
     NoEffects {
@@ -106,7 +105,7 @@ enum CmdlineMode {
         hard: bool,
         correct: bool,
         error: bool
-    },
+    }
 }
 
 impl CmdlineMode {
@@ -116,15 +115,17 @@ impl CmdlineMode {
         version: &Version
     ) -> XactUncommittedReq<u128, TestPayload, TestEffects> {
         match self {
-            CmdlineMode::NoEffects { hard, correct, error } => {
+            CmdlineMode::NoEffects {
+                hard,
+                correct,
+                error
+            } => {
                 let res = if *error {
                     Err(TestError {
                         err: String::from("test error")
                     })
                 } else {
-                    Ok(TestResult {
-                        val: vec![0x10]
-                    })
+                    Ok(TestResult { val: vec![0x10] })
                 };
                 let payload = if *correct {
                     TestPayload {
@@ -138,9 +139,7 @@ impl CmdlineMode {
                     }
                 };
                 let effects = if *hard {
-                    XactEffects::HardNone {
-                        when: None
-                    }
+                    XactEffects::HardNone { when: None }
                 } else {
                     XactEffects::SoftNone
                 };
@@ -150,18 +149,20 @@ impl CmdlineMode {
                     version.clone(),
                     0,
                     payload,
-                    effects,
+                    effects
                 )
-            },
-            CmdlineMode::Effects { hard, correct, error } => {
+            }
+            CmdlineMode::Effects {
+                hard,
+                correct,
+                error
+            } => {
                 let res = if *error {
                     Err(TestError {
                         err: String::from("test error")
                     })
                 } else {
-                    Ok(TestResult {
-                        val: vec![0x10]
-                    })
+                    Ok(TestResult { val: vec![0x10] })
                 };
                 let payload = if *correct {
                     TestPayload {
@@ -186,18 +187,16 @@ impl CmdlineMode {
                     version.clone(),
                     0,
                     payload,
-                    effects,
+                    effects
                 )
-            },
+            }
             CmdlineMode::SoftEmptyEffects { correct, error } => {
                 let res = if *error {
                     Err(TestError {
                         err: String::from("test error")
                     })
                 } else {
-                    Ok(TestResult {
-                        val: vec![0x10]
-                    })
+                    Ok(TestResult { val: vec![0x10] })
                 };
                 let payload = if *correct {
                     TestPayload {
@@ -211,9 +210,7 @@ impl CmdlineMode {
                     }
                 };
                 let effects = XactEffects::Effects {
-                    effects: TestEffects {
-                        effects: vec![]
-                    },
+                    effects: TestEffects { effects: vec![] },
                     hard: false
                 };
 
@@ -222,7 +219,7 @@ impl CmdlineMode {
                     version.clone(),
                     0,
                     payload,
-                    effects,
+                    effects
                 )
             }
         }
@@ -298,10 +295,8 @@ impl CmdlineSessionMsgs {
         mode: CmdlineMode,
         hash: SHA3Algo
     ) -> Self {
-        let uuid = Uuid::new_v5(
-            &Uuid::NAMESPACE_DNS,
-            TEST_SERVICE_NAME.as_bytes()
-        );
+        let uuid =
+            Uuid::new_v5(&Uuid::NAMESPACE_DNS, TEST_SERVICE_NAME.as_bytes());
 
         debug!(target: "cmdline-msgs",
                "service UUID: {}",
@@ -364,12 +359,7 @@ impl LargeObjMsgs<SHA3Algo, TestBatch> for CmdlineSessionMsgs {
 
     fn add_msgs<WrapperCodec, F>(
         &mut self,
-        sender: &mut LargeObjSender<
-            SHA3Algo,
-            TestBatch,
-            WrapperCodec,
-            F
-        >
+        sender: &mut LargeObjSender<SHA3Algo, TestBatch, WrapperCodec, F>
     ) -> Result<Option<Instant>, Self::AddMsgsError<WrapperCodec::EncodeError>>
     where
         WrapperCodec: Clone + Codec<TestBatch>,
@@ -472,7 +462,9 @@ impl
         let authn = PassthruMsgAuthN::default();
         let msgs = CmdlineSessionMsgs::new(
             CmdlineMode::NoEffects {
-                hard: true, correct: true, error: false
+                hard: true,
+                correct: true,
+                error: false
             },
             hash.clone()
         );
@@ -685,9 +677,6 @@ impl Display for CmdlineSessionError {
     }
 }
 
-
-
-
 const TEST_SERVICE_NAME: &str = "org.constellation.test";
 const TEST_VERSION: Version = Version::new(0, 0, 0);
 
@@ -732,17 +721,34 @@ pub struct TestSealCodec;
 
 pub struct TestStringError;
 
-type TestBatch = XactBatch<u128, SHA3ID, TestSeal, TestPayload,
-                           TestEffects, TestResult, TestError>;
-type TestBatchCodec =
-    XactBatchCodec<u128, SHA3Algo, TestSeal, TestPayload, TestEffects,
-                   TestResult, TestError, TestSealCodec, TestPayloadCodec,
-                   TestEffectsCodec, TestResultCodec, TestErrorCodec>;
+type TestBatch = XactBatch<
+    u128,
+    SHA3ID,
+    TestSeal,
+    TestPayload,
+    TestEffects,
+    TestResult,
+    TestError
+>;
+type TestBatchCodec = XactBatchCodec<
+    u128,
+    SHA3Algo,
+    TestSeal,
+    TestPayload,
+    TestEffects,
+    TestResult,
+    TestError,
+    TestSealCodec,
+    TestPayloadCodec,
+    TestEffectsCodec,
+    TestResultCodec,
+    TestErrorCodec
+>;
 
 impl Codec<TestSeal> for TestSealCodec {
     type CreateError = Infallible;
-    type EncodeError = Infallible;
     type DecodeError = Infallible;
+    type EncodeError = Infallible;
     type Param = ();
 
     #[inline]
@@ -778,8 +784,8 @@ impl Codec<TestSeal> for TestSealCodec {
 
 impl Codec<TestEffects> for TestEffectsCodec {
     type CreateError = Infallible;
-    type EncodeError = Infallible;
     type DecodeError = Infallible;
+    type EncodeError = Infallible;
     type Param = ();
 
     #[inline]
@@ -817,16 +823,14 @@ impl Codec<TestEffects> for TestEffectsCodec {
         let len = buf[0] as usize;
         let effects = buf[1..len + 1].to_vec();
 
-        Ok((TestEffects {
-            effects: effects
-        }, len + 1))
+        Ok((TestEffects { effects: effects }, len + 1))
     }
 }
 
 impl Codec<TestResult> for TestResultCodec {
     type CreateError = Infallible;
-    type EncodeError = Infallible;
     type DecodeError = Infallible;
+    type EncodeError = Infallible;
     type Param = ();
 
     #[inline]
@@ -864,16 +868,14 @@ impl Codec<TestResult> for TestResultCodec {
         let len = buf[0] as usize;
         let val = buf[1..len + 1].to_vec();
 
-        Ok((TestResult {
-            val: val
-        }, len + 1))
+        Ok((TestResult { val: val }, len + 1))
     }
 }
 
 impl Codec<TestError> for TestErrorCodec {
     type CreateError = Infallible;
-    type EncodeError = Infallible;
     type DecodeError = TestStringError;
+    type EncodeError = Infallible;
     type Param = ();
 
     #[inline]
@@ -911,19 +913,16 @@ impl Codec<TestError> for TestErrorCodec {
     ) -> Result<(TestError, usize), Self::DecodeError> {
         let len = buf[0] as usize;
         let val = buf[1..len + 1].to_vec();
-        let err = String::from_utf8(val)
-            .map_err(|_| TestStringError)?;
+        let err = String::from_utf8(val).map_err(|_| TestStringError)?;
 
-        Ok((TestError {
-            err: err
-        }, len + 1))
+        Ok((TestError { err: err }, len + 1))
     }
 }
 
 impl Codec<TestPayload> for TestPayloadCodec {
     type CreateError = Infallible;
-    type EncodeError = Infallible;
     type DecodeError = <TestErrorCodec as Codec<TestError>>::DecodeError;
+    type EncodeError = Infallible;
     type Param = ();
 
     #[inline]
@@ -939,7 +938,7 @@ impl Codec<TestPayload> for TestPayloadCodec {
         let effects = val.effects.len() + 1;
         let result = match &val.res {
             Ok(res) => TestResultCodec.buf_size(res) + 1,
-            Err(err) => TestErrorCodec.buf_size(err) + 1,
+            Err(err) => TestErrorCodec.buf_size(err) + 1
         };
 
         effects + result
@@ -960,16 +959,16 @@ impl Codec<TestPayload> for TestPayloadCodec {
             Ok(res) => {
                 buf[effects_len + 1] = 0;
 
-                let Ok(len) = TestResultCodec
-                    .encode(res, &mut buf[effects_len + 2..]);
+                let Ok(len) =
+                    TestResultCodec.encode(res, &mut buf[effects_len + 2..]);
 
                 len + 1
-            },
-            Err(err) =>  {
+            }
+            Err(err) => {
                 buf[effects_len + 1] = 1;
 
-                let Ok(len) = TestErrorCodec
-                    .encode(err, &mut buf[effects_len + 2..]);
+                let Ok(len) =
+                    TestErrorCodec.encode(err, &mut buf[effects_len + 2..]);
 
                 len + 1
             }
@@ -992,24 +991,24 @@ impl Codec<TestPayload> for TestPayloadCodec {
 
             (Ok(res), len)
         } else {
-            let (err, len) =
-                TestErrorCodec.decode(&buf[effects_len + 2..])?;
+            let (err, len) = TestErrorCodec.decode(&buf[effects_len + 2..])?;
 
             (Err(err), len)
         };
 
-        Ok((TestPayload {
-            effects: effects,
-            res: res
-        }, effects_len + res_len + 2))
+        Ok((
+            TestPayload {
+                effects: effects,
+                res: res
+            },
+            effects_len + res_len + 2
+        ))
     }
 }
 
 impl ScopedError for TestStringError {
     #[inline]
-    fn scope(
-        &self,
-    ) -> ErrorScope {
+    fn scope(&self) -> ErrorScope {
         ErrorScope::Unrecoverable
     }
 }

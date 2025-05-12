@@ -522,10 +522,9 @@ where
         debug!(target: "unicast-client-component",
                "starting unicaster");
 
-        let unicast_cleanup = unicast.start()
-            .map_err(|err| UnicastClientComponentRunError::IO {
-                err: err
-            })?;
+        let unicast_cleanup = unicast
+            .start()
+            .map_err(|err| UnicastClientComponentRunError::IO { err: err })?;
 
         Ok(UnicastClientComponentCleanup {
             shutdown: shutdown,

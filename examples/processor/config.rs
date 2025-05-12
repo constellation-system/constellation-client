@@ -53,7 +53,7 @@ pub struct ProcessorConfig {
     #[serde(flatten)]
     registry: RegistryConfig,
     #[serde(flatten)]
-    multicast: UnicastClientConfig<
+    unicast: UnicastClientConfig<
         ChannelRegistryChannelsConfig<
             <LargeObjMsgCodec<SHA3Algo> as Codec<LargeObjMsg<SHA3ID>>>::Param
         >,
@@ -81,11 +81,6 @@ impl ProcessorConfig {
         >,
         LargeObjProtoConfig<((), (), (), (), ()), ()>
     ){
-        (
-            self.name_caches,
-            self.registry,
-            self.multicast,
-            self.session
-        )
+        (self.name_caches, self.registry, self.unicast, self.session)
     }
 }

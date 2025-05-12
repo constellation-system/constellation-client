@@ -16,8 +16,8 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
-use std::convert::Infallible;
 use std::collections::HashSet;
+use std::convert::Infallible;
 use std::fmt::Display;
 use std::fmt::Error;
 use std::fmt::Formatter;
@@ -61,12 +61,12 @@ use constellation_common::sync::Notify;
 use constellation_common::version::FullVersion;
 use constellation_common::version::Version;
 use constellation_common::version::VersionSuffix;
-use constellation_component_common::xact::XactHashBatch;
 use constellation_component_common::xact::XactBatchHashCodec;
 use constellation_component_common::xact::XactCommittedReq;
 use constellation_component_common::xact::XactCommittedRound;
 use constellation_component_common::xact::XactEffects;
 use constellation_component_common::xact::XactError;
+use constellation_component_common::xact::XactHashBatch;
 use constellation_component_common::xact::XactLinPoint;
 use constellation_component_common::xact::XactNotify;
 use constellation_component_common::xact::XactNotifyState;
@@ -180,11 +180,11 @@ impl
 impl ProcessorSessionMsgs {
     #[inline]
     fn new(
-        pending: Arc<Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>>
+        pending: Arc<
+            Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>
+        >
     ) -> Self {
-        ProcessorSessionMsgs {
-            pending: pending
-        }
+        ProcessorSessionMsgs { pending: pending }
     }
 }
 
@@ -193,7 +193,9 @@ impl ProcessorSessionRecv {
     fn new(
         class: Uuid,
         version: Version,
-        pending: Arc<Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>>
+        pending: Arc<
+            Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>
+        >
     ) -> Self {
         ProcessorSessionRecv {
             class: class,
@@ -207,41 +209,41 @@ impl ProcessorSessionRecv {
 impl ProcessorSessionMsgs {
     fn get_msgs(
         &self
-    ) -> Result<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>,
-                MutexPoison> {
-        let mut guard = self
-            .pending
-            .lock()
-            .map_err(|_| MutexPoison)?;
+    ) -> Result<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>, MutexPoison>
+    {
+        let mut guard = self.pending.lock().map_err(|_| MutexPoison)?;
 
         Ok(std::mem::replace(guard.deref_mut(), Vec::new()))
     }
 }
 
 impl LargeObjMsgs<SHA3Algo, TestBatch> for ProcessorSessionMsgs {
-    type AddMsgsError<Encode> = WithMutexPoison<
-        LargeObjProtoAddOutboundError<SHA3ID, Encode>
-    > where
+    type AddMsgsError<Encode>
+        = WithMutexPoison<LargeObjProtoAddOutboundError<SHA3ID, Encode>>
+    where
         Encode: Display + ScopedError;
 
     fn add_msgs<WrapperCodec, F>(
         &mut self,
-        sender: &mut LargeObjSender<
-            SHA3Algo,
-            TestBatch,
-            WrapperCodec,
-            F
-        >
+        sender: &mut LargeObjSender<SHA3Algo, TestBatch, WrapperCodec, F>
     ) -> Result<Option<Instant>, Self::AddMsgsError<WrapperCodec::EncodeError>>
     where
         WrapperCodec: Clone + Codec<TestBatch>,
         WrapperCodec::Param: Default,
         F: Frags {
         let msgs = self.get_msgs()?;
-        let batch = XactHashBatch::new(vec![], vec![], msgs);
 
-        sender.add_outbound(&batch)
-            .map_err(|err| WithMutexPoison::Inner { error: err })?;
+        if msgs.len() != 0 {
+            debug!(target: "processor-session-msgs",
+                   "sending {} notifies",
+                   msgs.len());
+
+            let batch = XactHashBatch::new(vec![], vec![], msgs);
+
+            sender
+                .add_outbound(&batch)
+                .map_err(|err| WithMutexPoison::Inner { error: err })?;
+        }
 
         Ok(None)
     }
@@ -250,9 +252,10 @@ impl LargeObjMsgs<SHA3Algo, TestBatch> for ProcessorSessionMsgs {
 impl ProcessorSessionRecv {
     fn run_uncommitted(
         &self,
-        req: XactSealed<TestSeal,
-                        XactUncommittedHashReq<u128, SHA3ID, TestPayload,
-                                               TestEffects>>
+        req: XactSealed<
+            TestSeal,
+            XactUncommittedHashReq<u128, SHA3ID, TestPayload, TestEffects>
+        >
     ) -> XactNotify<u128, SHA3ID, TestResult, TestError> {
         let (_, req) = req.take();
         let (class, version, instance, hash, effects, payload) = req.take();
@@ -265,15 +268,13 @@ impl ProcessorSessionRecv {
             Err(XactError::UnknownInstance)
         } else {
             match effects {
-                XactEffects::Effects { .. } =>
-                    Err(XactError::Uncommitted),
-                XactEffects::HardNone { .. } |
-                XactEffects::SoftNone => if payload.effects.is_empty() {
-                    payload.res.map_err(|err| XactError::Error {
-                        err: err
-                    })
-                } else {
-                    Err(XactError::Uncommitted)
+                XactEffects::Effects { .. } => Err(XactError::Uncommitted),
+                XactEffects::HardNone { .. } | XactEffects::SoftNone => {
+                    if payload.effects.is_empty() {
+                        payload.res.map_err(|err| XactError::Error { err: err })
+                    } else {
+                        Err(XactError::Uncommitted)
+                    }
                 }
             }
         };
@@ -286,11 +287,9 @@ impl ProcessorSessionRecv {
                 };
 
                 XactNotify::new(hash, state)
-            },
+            }
             Err(err) => {
-                let state = XactNotifyState::Error {
-                    error: Some(err),
-                };
+                let state = XactNotifyState::Error { error: Some(err) };
 
                 XactNotify::new(hash, state)
             }
@@ -300,7 +299,7 @@ impl ProcessorSessionRecv {
     fn run_committed(
         &self,
         hash: SHA3ID,
-        req: XactCommittedReq<TestPayload, TestEffects>,
+        req: XactCommittedReq<TestPayload, TestEffects>
     ) -> XactNotify<u128, SHA3ID, TestResult, TestError> {
         let (class, version, instance, _, effects, payload) = req.take();
 
@@ -313,22 +312,18 @@ impl ProcessorSessionRecv {
         } else {
             match effects {
                 Some(effects) if effects.hard() => {
-                    let expected: HashSet<u8> = effects.effects()
-                        .effects.iter().cloned().collect();
-                    let actual: HashSet<u8> = payload.effects.iter()
-                        .cloned().collect();
+                    let expected: HashSet<u8> =
+                        effects.effects().effects.iter().cloned().collect();
+                    let actual: HashSet<u8> =
+                        payload.effects.iter().cloned().collect();
 
                     if actual.is_subset(&expected) {
-                        payload.res.map_err(|err| XactError::Error {
-                            err: err
-                        })
+                        payload.res.map_err(|err| XactError::Error { err: err })
                     } else {
                         Err(XactError::EffectViolation)
                     }
-                },
-                _ => payload.res.map_err(|err| XactError::Error {
-                    err: err
-                })
+                }
+                _ => payload.res.map_err(|err| XactError::Error { err: err })
             }
         };
 
@@ -340,11 +335,9 @@ impl ProcessorSessionRecv {
                 };
 
                 XactNotify::new(hash, state)
-            },
+            }
             Err(err) => {
-                let state = XactNotifyState::Error {
-                    error: Some(err),
-                };
+                let state = XactNotifyState::Error { error: Some(err) };
 
                 XactNotify::new(hash, state)
             }
@@ -353,16 +346,16 @@ impl ProcessorSessionRecv {
 
     fn process_uncommitted_reqs(
         &self,
-        reqs: Vec<XactSealed<TestSeal,
-                             XactUncommittedHashReq<u128, SHA3ID, TestPayload,
-                                                    TestEffects>>>
+        reqs: Vec<
+            XactSealed<
+                TestSeal,
+                XactUncommittedHashReq<u128, SHA3ID, TestPayload, TestEffects>
+            >
+        >
     ) -> Result<(), MutexPoison> {
         for req in reqs {
             let res = self.run_uncommitted(req);
-            let mut guard = self
-                .pending
-                .lock()
-                .map_err(|_| MutexPoison)?;
+            let mut guard = self.pending.lock().map_err(|_| MutexPoison)?;
 
             guard.push(res);
         }
@@ -372,8 +365,15 @@ impl ProcessorSessionRecv {
 
     fn process_committed_rounds(
         &self,
-        rounds: Vec<XactCommittedRound<u128, SHA3ID, TestSeal,
-                                       TestPayload, TestEffects>>,
+        rounds: Vec<
+            XactCommittedRound<
+                u128,
+                SHA3ID,
+                TestSeal,
+                TestPayload,
+                TestEffects
+            >
+        >
     ) -> Result<(), MutexPoison> {
         let mut codec = TestBatchCodec::create(((), (), (), (), ()))
             .expect("Expected success");
@@ -518,10 +518,8 @@ impl
         ),
         Self::CreateError
     > {
-        let class = Uuid::new_v5(
-            &Uuid::NAMESPACE_DNS,
-            TEST_SERVICE_NAME.as_bytes()
-        );
+        let class =
+            Uuid::new_v5(&Uuid::NAMESPACE_DNS, TEST_SERVICE_NAME.as_bytes());
         let version = Version::new(0, 0, 0);
         let hash = SHA3Algo::default();
         let authn = PassthruMsgAuthN::default();
@@ -684,9 +682,6 @@ impl Display for ProcessorSessionError {
     }
 }
 
-
-
-
 const TEST_SERVICE_NAME: &str = "org.constellation.test";
 const TEST_VERSION: Version = Version::new(0, 0, 0);
 
@@ -731,17 +726,34 @@ pub struct TestSealCodec;
 
 pub struct TestStringError;
 
-type TestBatch = XactHashBatch<u128, SHA3ID, TestSeal, TestPayload,
-                               TestEffects, TestResult, TestError>;
-type TestBatchCodec =
-    XactBatchHashCodec<u128, SHA3Algo, TestSeal, TestPayload, TestEffects,
-                       TestResult, TestError, TestSealCodec, TestPayloadCodec,
-                       TestEffectsCodec, TestResultCodec, TestErrorCodec>;
+type TestBatch = XactHashBatch<
+    u128,
+    SHA3ID,
+    TestSeal,
+    TestPayload,
+    TestEffects,
+    TestResult,
+    TestError
+>;
+type TestBatchCodec = XactBatchHashCodec<
+    u128,
+    SHA3Algo,
+    TestSeal,
+    TestPayload,
+    TestEffects,
+    TestResult,
+    TestError,
+    TestSealCodec,
+    TestPayloadCodec,
+    TestEffectsCodec,
+    TestResultCodec,
+    TestErrorCodec
+>;
 
 impl Codec<TestSeal> for TestSealCodec {
     type CreateError = Infallible;
-    type EncodeError = Infallible;
     type DecodeError = Infallible;
+    type EncodeError = Infallible;
     type Param = ();
 
     #[inline]
@@ -777,8 +789,8 @@ impl Codec<TestSeal> for TestSealCodec {
 
 impl Codec<TestEffects> for TestEffectsCodec {
     type CreateError = Infallible;
-    type EncodeError = Infallible;
     type DecodeError = Infallible;
+    type EncodeError = Infallible;
     type Param = ();
 
     #[inline]
@@ -816,16 +828,14 @@ impl Codec<TestEffects> for TestEffectsCodec {
         let len = buf[0] as usize;
         let effects = buf[1..len + 1].to_vec();
 
-        Ok((TestEffects {
-            effects: effects
-        }, len + 1))
+        Ok((TestEffects { effects: effects }, len + 1))
     }
 }
 
 impl Codec<TestResult> for TestResultCodec {
     type CreateError = Infallible;
-    type EncodeError = Infallible;
     type DecodeError = Infallible;
+    type EncodeError = Infallible;
     type Param = ();
 
     #[inline]
@@ -863,16 +873,14 @@ impl Codec<TestResult> for TestResultCodec {
         let len = buf[0] as usize;
         let val = buf[1..len + 1].to_vec();
 
-        Ok((TestResult {
-            val: val
-        }, len + 1))
+        Ok((TestResult { val: val }, len + 1))
     }
 }
 
 impl Codec<TestError> for TestErrorCodec {
     type CreateError = Infallible;
-    type EncodeError = Infallible;
     type DecodeError = TestStringError;
+    type EncodeError = Infallible;
     type Param = ();
 
     #[inline]
@@ -910,19 +918,16 @@ impl Codec<TestError> for TestErrorCodec {
     ) -> Result<(TestError, usize), Self::DecodeError> {
         let len = buf[0] as usize;
         let val = buf[1..len + 1].to_vec();
-        let err = String::from_utf8(val)
-            .map_err(|_| TestStringError)?;
+        let err = String::from_utf8(val).map_err(|_| TestStringError)?;
 
-        Ok((TestError {
-            err: err
-        }, len + 1))
+        Ok((TestError { err: err }, len + 1))
     }
 }
 
 impl Codec<TestPayload> for TestPayloadCodec {
     type CreateError = Infallible;
-    type EncodeError = Infallible;
     type DecodeError = <TestErrorCodec as Codec<TestError>>::DecodeError;
+    type EncodeError = Infallible;
     type Param = ();
 
     #[inline]
@@ -938,7 +943,7 @@ impl Codec<TestPayload> for TestPayloadCodec {
         let effects = val.effects.len() + 1;
         let result = match &val.res {
             Ok(res) => TestResultCodec.buf_size(res) + 1,
-            Err(err) => TestErrorCodec.buf_size(err) + 1,
+            Err(err) => TestErrorCodec.buf_size(err) + 1
         };
 
         effects + result
@@ -959,16 +964,16 @@ impl Codec<TestPayload> for TestPayloadCodec {
             Ok(res) => {
                 buf[effects_len + 1] = 0;
 
-                let Ok(len) = TestResultCodec
-                    .encode(res, &mut buf[effects_len + 2..]);
+                let Ok(len) =
+                    TestResultCodec.encode(res, &mut buf[effects_len + 2..]);
 
                 len + 1
-            },
-            Err(err) =>  {
+            }
+            Err(err) => {
                 buf[effects_len + 1] = 1;
 
-                let Ok(len) = TestErrorCodec
-                    .encode(err, &mut buf[effects_len + 2..]);
+                let Ok(len) =
+                    TestErrorCodec.encode(err, &mut buf[effects_len + 2..]);
 
                 len + 1
             }
@@ -991,24 +996,24 @@ impl Codec<TestPayload> for TestPayloadCodec {
 
             (Ok(res), len)
         } else {
-            let (err, len) =
-                TestErrorCodec.decode(&buf[effects_len + 2..])?;
+            let (err, len) = TestErrorCodec.decode(&buf[effects_len + 2..])?;
 
             (Err(err), len)
         };
 
-        Ok((TestPayload {
-            effects: effects,
-            res: res
-        }, effects_len + res_len + 2))
+        Ok((
+            TestPayload {
+                effects: effects,
+                res: res
+            },
+            effects_len + res_len + 2
+        ))
     }
 }
 
 impl ScopedError for TestStringError {
     #[inline]
-    fn scope(
-        &self,
-    ) -> ErrorScope {
+    fn scope(&self) -> ErrorScope {
         ErrorScope::Unrecoverable
     }
 }

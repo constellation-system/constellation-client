@@ -524,9 +524,9 @@ where
         debug!(target: "multicast-client-component",
                "starting multicaster");
 
-        let multicast_cleanup = multicast.start().map_err(|err| {
-            MulticastClientComponentRunError::IO { err: err }
-        })?;
+        let multicast_cleanup = multicast
+            .start()
+            .map_err(|err| MulticastClientComponentRunError::IO { err: err })?;
 
         Ok(MulticastClientComponentCleanup {
             shutdown: shutdown,
@@ -568,8 +568,9 @@ where
             MulticastClientComponentRunError::Session { err } => err.fmt(f),
             MulticastClientComponentRunError::Multicast { err } => err.fmt(f),
             MulticastClientComponentRunError::Start { err } => err.fmt(f),
-            MulticastClientComponentRunError::IO { err } =>
-                write!(f, "{}", err),
+            MulticastClientComponentRunError::IO { err } => {
+                write!(f, "{}", err)
+            }
             MulticastClientComponentRunError::SkippedIdx => {
                 write!(f, "stream parties skipped an index")
             }
