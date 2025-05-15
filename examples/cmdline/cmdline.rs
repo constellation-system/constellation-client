@@ -382,7 +382,7 @@ impl LargeObjMsgs<SHA3Algo, TestBatch> for CmdlineSessionMsgs {
             self.when = now + Duration::from_secs(5);
         }
 
-        Ok(Some(self.when))
+        Ok(None)
     }
 }
 
@@ -391,13 +391,9 @@ impl AuthNMsgRecv<String, TestBatch> for CmdlineSessionRecv {
 
     fn recv_auth_msg(
         &mut self,
-        prin: &String,
+        _prin: &String,
         msg: TestBatch
     ) -> Result<(), Self::RecvError> {
-        info!(target: "cmdline-recv",
-              "received batch from {}: {:?}",
-              prin, msg);
-
         for _ in msg.uncommitted() {
             warn!(target: "cmdline-recv",
                   "discarding uncommitted request")
