@@ -95,7 +95,10 @@ pub struct ProcessorSession;
 
 #[derive(Clone)]
 pub struct ProcessorSessionMsgs {
-    pending: Arc<Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>>
+    pending: Arc<Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>>,
+    // XXX this is a hack to get the demo working; replace with a
+    // processor capability reporting message of some kind.
+    first: bool
 }
 
 #[derive(Clone)]
@@ -103,7 +106,8 @@ pub struct ProcessorSessionRecv {
     class: Uuid,
     version: Version,
     pending: Arc<Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>>,
-    when: XactLinPoint<u128>
+    when: XactLinPoint<u128>,
+    notify: Notify
 }
 
 pub struct ProcessorSessionCleanup;
@@ -184,7 +188,10 @@ impl ProcessorSessionMsgs {
             Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>
         >
     ) -> Self {
-        ProcessorSessionMsgs { pending: pending }
+        ProcessorSessionMsgs {
+            pending: pending,
+            first: true
+        }
     }
 }
 
@@ -195,12 +202,14 @@ impl ProcessorSessionRecv {
         version: Version,
         pending: Arc<
             Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>
-        >
+        >,
+        notify: Notify
     ) -> Self {
         ProcessorSessionRecv {
             class: class,
             version: version,
             pending: pending,
+            notify: notify,
             when: XactLinPoint::new(0, 0)
         }
     }
@@ -233,13 +242,14 @@ impl LargeObjMsgs<SHA3Algo, TestBatch> for ProcessorSessionMsgs {
         F: Frags {
         let msgs = self.get_msgs()?;
 
-        if msgs.len() != 0 {
+        if self.first || msgs.len() != 0 {
             debug!(target: "processor-session-msgs",
                    "sending {} notifies",
                    msgs.len());
 
             let batch = XactHashBatch::new(vec![], vec![], msgs);
 
+            self.first = false;
             sender
                 .add_outbound(&batch)
                 .map_err(|err| WithMutexPoison::Inner { error: err })?;
@@ -260,19 +270,49 @@ impl ProcessorSessionRecv {
         let (_, req) = req.take();
         let (class, version, instance, hash, effects, payload) = req.take();
 
+        info!(target: "processor-recv",
+              "processing transaction {}",
+              hash);
+
         let res = if class != self.class {
+            debug!(target: "processor-recv",
+                  "bad transaction class {}",
+                   class);
+
             Err(XactError::UnknownClass)
         } else if version != self.version {
+            debug!(target: "processor-recv",
+                  "bad transaction version {}",
+                   version);
+
             Err(XactError::UnknownVersion)
         } else if instance != 0 {
+            debug!(target: "processor-recv",
+                  "bad transaction instance {}",
+                   instance);
+
             Err(XactError::UnknownInstance)
         } else {
             match effects {
-                XactEffects::Effects { .. } => Err(XactError::Uncommitted),
+                XactEffects::Effects { .. } => {
+                    debug!(target: "processor-recv",
+                           "transaction reports effects but is uncommitted");
+
+                    Err(XactError::Uncommitted)
+                }
                 XactEffects::HardNone { .. } | XactEffects::SoftNone => {
+                    debug!(target: "processor-recv",
+                           "transaction reports no effects");
+
                     if payload.effects.is_empty() {
+                        debug!(target: "processor-recv",
+                               "generating normal result");
+
                         payload.res.map_err(|err| XactError::Error { err: err })
                     } else {
+                        debug!(target: "processor-recv",
+                               "transaction reports causes effects");
+
                         Err(XactError::Uncommitted)
                     }
                 }
@@ -303,15 +343,34 @@ impl ProcessorSessionRecv {
     ) -> XactNotify<u128, SHA3ID, TestResult, TestError> {
         let (class, version, instance, _, effects, payload) = req.take();
 
+        info!(target: "processor-recv",
+              "processing transaction {}",
+              hash);
+
         let res = if class != self.class {
+            debug!(target: "processor-recv",
+                  "bad transaction class {}",
+                   class);
+
             Err(XactError::UnknownClass)
         } else if version != self.version {
+            debug!(target: "processor-recv",
+                  "bad transaction version {}",
+                   version);
+
             Err(XactError::UnknownVersion)
         } else if instance != 0 {
+            debug!(target: "processor-recv",
+                  "bad transaction instance {}",
+                   instance);
+
             Err(XactError::UnknownInstance)
         } else {
             match effects {
                 Some(effects) if effects.hard() => {
+                    debug!(target: "processor-recv",
+                           "transaction has effects");
+
                     let expected: HashSet<u8> =
                         effects.effects().effects.iter().cloned().collect();
                     let actual: HashSet<u8> =
@@ -323,7 +382,12 @@ impl ProcessorSessionRecv {
                         Err(XactError::EffectViolation)
                     }
                 }
-                _ => payload.res.map_err(|err| XactError::Error { err: err })
+                _ => {
+                    debug!(target: "processor-recv",
+                           "generating result");
+
+                    payload.res.map_err(|err| XactError::Error { err: err })
+                }
             }
         };
 
@@ -353,11 +417,15 @@ impl ProcessorSessionRecv {
             >
         >
     ) -> Result<(), MutexPoison> {
+        info!(target: "processor-recv",
+              "processing uncommitted transactions");
+
         for req in reqs {
             let res = self.run_uncommitted(req);
             let mut guard = self.pending.lock().map_err(|_| MutexPoison)?;
 
             guard.push(res);
+            self.notify.notify().map_err(|_| MutexPoison)?;
         }
 
         Ok(())
@@ -381,12 +449,12 @@ impl ProcessorSessionRecv {
         for round in rounds {
             let (id, seal, reqs) = round.take();
 
-            info!(target: "cmdline-recv",
+            info!(target: "processor-recv",
                   "processing transactions from round {}",
                   id);
 
             if let Some(seal) = seal {
-                debug!(target: "cmdline-recv",
+                debug!(target: "processor-recv",
                        "checking round {} against consensus seal",
                        id);
 
@@ -402,7 +470,10 @@ impl ProcessorSessionRecv {
                                 self.pending
                                     .lock()
                                     .map_err(|_| MutexPoison)?
-                                    .push(res)
+                                    .push(res);
+                                self.notify
+                                    .notify()
+                                    .map_err(|_| MutexPoison)?;
                             } else {
                                 let state = XactNotifyState::Error {
                                     error: Some(XactError::HashMismatch)
@@ -412,18 +483,21 @@ impl ProcessorSessionRecv {
                                 self.pending
                                     .lock()
                                     .map_err(|_| MutexPoison)?
-                                    .push(res)
+                                    .push(res);
+                                self.notify
+                                    .notify()
+                                    .map_err(|_| MutexPoison)?;
                             }
                         }
                         Err(err) => {
-                            debug!(target: "cmdline-recv",
+                            debug!(target: "processor-recv",
                                    "error computing hash: {}",
                                    err);
                         }
                     }
                 }
             } else {
-                debug!(target: "cmdline-recv",
+                debug!(target: "processor-recv",
                        "round {} has no consensus seal",
                        id);
 
@@ -435,10 +509,11 @@ impl ProcessorSessionRecv {
                             self.pending
                                 .lock()
                                 .map_err(|_| MutexPoison)?
-                                .push(res)
+                                .push(res);
+                            self.notify.notify().map_err(|_| MutexPoison)?;
                         }
                         Err(err) => {
-                            debug!(target: "cmdline-recv",
+                            debug!(target: "processor-recv",
                                    "error computing hash: {}",
                                    err);
                         }
@@ -461,7 +536,7 @@ impl AuthNMsgRecv<TestCred, TestBatch> for ProcessorSessionRecv {
     ) -> Result<(), Self::RecvError> {
         let (committed, uncommitted, notifies) = msg.take();
 
-        info!(target: "cmdline-recv",
+        info!(target: "processor-recv",
               "received batch from {}",
               prin);
 
@@ -469,7 +544,7 @@ impl AuthNMsgRecv<TestCred, TestBatch> for ProcessorSessionRecv {
         self.process_committed_rounds(committed)?;
 
         for notify in notifies {
-            warn!(target: "cmdline-recv",
+            warn!(target: "processor-recv",
                   "discarded notification for {}: {}",
                   notify.hash(), notify.state())
         }
@@ -524,9 +599,10 @@ impl
         let hash = SHA3Algo::default();
         let authn = PassthruMsgAuthN::default();
         let pending = Arc::new(Mutex::new(Vec::new()));
-        let msgs = ProcessorSessionMsgs::new(pending.clone());
-        let recv = ProcessorSessionRecv::new(class, version, pending);
         let notify = Notify::new();
+        let msgs = ProcessorSessionMsgs::new(pending.clone());
+        let recv =
+            ProcessorSessionRecv::new(class, version, pending, notify.clone());
         let proto = LargeObjProto::create(
             config,
             notify.clone(),
@@ -987,6 +1063,10 @@ impl Codec<TestPayload> for TestPayloadCodec {
         &mut self,
         buf: &[u8]
     ) -> Result<(TestPayload, usize), Self::DecodeError> {
+        debug!(target: "processor",
+               "decoding {} bytes, {:?}",
+               buf.len(), buf);
+
         let effects_len = buf[0] as usize;
         let effects = buf[1..effects_len + 1].to_vec();
 

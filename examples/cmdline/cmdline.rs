@@ -946,6 +946,9 @@ impl Codec<TestPayload> for TestPayloadCodec {
         val: &TestPayload,
         buf: &mut [u8]
     ) -> Result<usize, Self::EncodeError> {
+        debug!(target: "test-codec",
+               "buffer: {:?}",
+               buf);
         let effects_len = val.effects.len();
 
         buf[0] = effects_len as u8;
@@ -970,6 +973,10 @@ impl Codec<TestPayload> for TestPayloadCodec {
             }
         };
 
+        debug!(target: "test-codec",
+               "Encoded: {:?}, len {}",
+               buf, effects_len + res_len + 1);
+
         Ok(effects_len + res_len + 1)
     }
 
@@ -987,7 +994,7 @@ impl Codec<TestPayload> for TestPayloadCodec {
 
             (Ok(res), len)
         } else {
-            let (err, len) = TestErrorCodec.decode(&buf[effects_len + 2..])?;
+            let (err, len) = TestErrorCodec.decode(&buf[effects_len + 1..])?;
 
             (Err(err), len)
         };
