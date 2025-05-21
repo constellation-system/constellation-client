@@ -235,6 +235,7 @@ pub struct UnicastClientComponent<
         Epochs::Config,
         Endpoint
     >,
+    session_args: Session::Args,
     session_config: Session::Config,
     listener: ThreadedFlowsListener<
         <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
@@ -402,6 +403,7 @@ where
             Epochs::Config,
             Endpoint
         >,
+        session_args: Session::Args,
         session_config: Session::Config,
         listener: ThreadedFlowsListener<
             <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
@@ -422,6 +424,7 @@ where
             resolver: PhantomData,
             session: PhantomData,
             config: config,
+            session_args: session_args,
             session_config: session_config,
             listener: listener,
             shutdown: shutdown,
@@ -474,6 +477,7 @@ where
     >{
         let UnicastClientComponent {
             config,
+            session_args,
             session_config,
             listener,
             ctx,
@@ -485,9 +489,9 @@ where
               "starting unicast client component");
 
         let unicast_config = config.take();
-        let (session, notify, proto) = Session::create(session_config)
-            .map_err(|err| UnicastClientComponentRunError::Session {
-                err: err
+        let (session, notify, proto) =
+            Session::create(session_args, session_config).map_err(|err| {
+                UnicastClientComponentRunError::Session { err: err }
             })?;
         let unicast: UnicastLargeObjBus<
             _,

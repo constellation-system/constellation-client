@@ -28,7 +28,10 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use std::time::Instant;
 
+use clap::Arg;
+use clap::ArgAction;
 use clap::ArgMatches;
+use clap::Command;
 use constellation_auth::authn::AuthNMsgRecv;
 use constellation_auth::authn::PassthruMsgAuthN;
 use constellation_auth::authn::TestAuthN;
@@ -91,7 +94,7 @@ use uuid::Uuid;
 use crate::config::CmdlineConfig;
 
 #[derive(Clone)]
-enum CmdlineMode {
+pub enum CmdlineMode {
     NoEffects {
         hard: bool,
         correct: bool,
@@ -243,6 +246,7 @@ pub struct CmdlineSessionMsgs {
 #[derive(Clone)]
 pub struct CmdlineSessionRecv;
 
+#[derive(Clone)]
 pub struct CmdlineSessionCleanup;
 
 pub enum CmdlineSessionError {
@@ -426,6 +430,7 @@ impl
         CmdlineSessionRecv
     > for CmdlineSession
 {
+    type Args = CmdlineMode;
     type Cleanup = CmdlineSessionCleanup;
     type Config = LargeObjProtoConfig<((), (), (), (), ()), ()>;
     type CreateError = LargeObjProtoCreateError<
@@ -434,6 +439,7 @@ impl
     type StartError = MutexPoison;
 
     fn create(
+        mode: CmdlineMode,
         config: Self::Config
     ) -> Result<
         (
@@ -456,14 +462,7 @@ impl
     > {
         let hash = SHA3Algo::default();
         let authn = PassthruMsgAuthN::default();
-        let msgs = CmdlineSessionMsgs::new(
-            CmdlineMode::NoEffects {
-                hard: true,
-                correct: true,
-                error: false
-            },
-            hash.clone()
-        );
+        let msgs = CmdlineSessionMsgs::new(mode, hash.clone());
         let recv = CmdlineSessionRecv::default();
         let notify = Notify::new();
         let proto = LargeObjProto::create(
@@ -510,7 +509,7 @@ impl Standalone for StandaloneCmdline {
     );
 
     fn create(
-        _args: ArgMatches,
+        mut args: ArgMatches,
         config: Self::Config
     ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
         let (
@@ -526,6 +525,9 @@ impl Standalone for StandaloneCmdline {
             shutdown: shutdown.clone(),
             caches_join: caches_join
         };
+        let hard = args.get_count("hard") != 0;
+        let error = args.get_count("fail") != 0;
+        let correct = args.get_count("violate") == 0;
         let (listener, reporter) = ThreadedFlowsListener::new();
 
         // ISSUE #6: This part is temporary, until we get a real
@@ -585,7 +587,8 @@ impl Standalone for StandaloneCmdline {
             }
         };
 
-        let authn = Arc::new(TestAuthN::create(authn_parties.into_iter()));
+        let authn =
+            Arc::new(TestAuthN::from_parties(authn_parties.into_iter()));
 
         match StandaloneRegistry::create(
             &mut caches,
@@ -598,18 +601,83 @@ impl Standalone for StandaloneCmdline {
                     registry: Arc::new(registry),
                     caches: caches
                 };
-                let component = MulticastClientComponent::create(
-                    client_config,
-                    session_config,
-                    listener,
-                    shutdown,
-                    ctx
-                );
-                let standalone = StandaloneCmdline {
-                    component: component
-                };
 
-                Ok((standalone, cleanup))
+                match args.remove_one::<String>("effects") {
+                    Some(string) => match string.as_str() {
+                        "none" => {
+                            let mode = CmdlineMode::NoEffects {
+                                correct: correct,
+                                error: error,
+                                hard: hard
+                            };
+                            let component = MulticastClientComponent::create(
+                                client_config,
+                                mode,
+                                session_config,
+                                listener,
+                                shutdown,
+                                ctx
+                            );
+                            let standalone = StandaloneCmdline {
+                                component: component
+                            };
+
+                            Ok((standalone, cleanup))
+                        }
+                        "empty" => {
+                            let mode = CmdlineMode::SoftEmptyEffects {
+                                correct: correct,
+                                error: error
+                            };
+                            let component = MulticastClientComponent::create(
+                                client_config,
+                                mode,
+                                session_config,
+                                listener,
+                                shutdown,
+                                ctx
+                            );
+                            let standalone = StandaloneCmdline {
+                                component: component
+                            };
+
+                            Ok((standalone, cleanup))
+                        }
+                        "effects" => {
+                            let mode = CmdlineMode::Effects {
+                                correct: correct,
+                                error: error,
+                                hard: hard
+                            };
+                            let component = MulticastClientComponent::create(
+                                client_config,
+                                mode,
+                                session_config,
+                                listener,
+                                shutdown,
+                                ctx
+                            );
+                            let standalone = StandaloneCmdline {
+                                component: component
+                            };
+
+                            Ok((standalone, cleanup))
+                        }
+                        effects => {
+                            error!(target: "start",
+                                   "invalid effects on command line: \"{}\"",
+                                   effects);
+
+                            Err(cleanup)
+                        }
+                    },
+                    None => {
+                        error!(target: "start",
+                               "no effects given on command line");
+
+                        Err(cleanup)
+                    }
+                }
             }
             Err(err) => {
                 error!(target: "start",
@@ -619,6 +687,33 @@ impl Standalone for StandaloneCmdline {
                 Err(cleanup)
             }
         }
+    }
+
+    fn cmdargs(cmd: Command) -> Command {
+        cmd.arg(
+            Arg::new("effects")
+                .value_parser(["none", "empty", "effects"])
+                .help("type of effects to send")
+                .required(true)
+        )
+        .arg(
+            Arg::new("fail")
+                .long("fail")
+                .help("have the transaction fail")
+                .action(ArgAction::Count)
+        )
+        .arg(
+            Arg::new("violate")
+                .long("violate")
+                .help("have the transaction violate the effect constraints")
+                .action(ArgAction::Count)
+        )
+        .arg(
+            Arg::new("hard")
+                .long("hard")
+                .help("have the transaction generate hard effect constraints")
+                .action(ArgAction::Count)
+        )
     }
 }
 
@@ -1036,7 +1131,7 @@ impl Display for TestError {
         &self,
         f: &mut Formatter<'_>
     ) -> Result<(), Error> {
-        write!(f, "{}", self)
+        write!(f, "{}", self.err)
     }
 }
 

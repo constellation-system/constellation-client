@@ -233,6 +233,7 @@ pub struct MulticastClientComponent<
         Epochs::Config,
         Endpoint
     >,
+    session_args: Session::Args,
     session_config: Session::Config,
     listener: ThreadedFlowsListener<
         <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
@@ -400,6 +401,7 @@ where
             Epochs::Config,
             Endpoint
         >,
+        session_args: Session::Args,
         session_config: Session::Config,
         listener: ThreadedFlowsListener<
             <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
@@ -420,6 +422,7 @@ where
             resolver: PhantomData,
             session: PhantomData,
             config: config,
+            session_args: session_args,
             session_config: session_config,
             listener: listener,
             shutdown: shutdown,
@@ -471,6 +474,7 @@ where
         >
     >{
         let MulticastClientComponent {
+            session_args,
             session_config,
             config,
             listener,
@@ -483,9 +487,9 @@ where
               "starting multicast client component");
 
         let (self_party, multicast_config) = config.take();
-        let (session, notify, proto) = Session::create(session_config)
-            .map_err(|err| MulticastClientComponentRunError::Session {
-                err: err
+        let (session, notify, proto) =
+            Session::create(session_args, session_config).map_err(|err| {
+                MulticastClientComponentRunError::Session { err: err }
             })?;
         let multicast: MulticastLargeObjBus<
             _,
@@ -505,7 +509,7 @@ where
             _,
             _
         > = MulticastLargeObjBus::create(
-            self_party.clone(),
+            Some(self_party.clone()),
             multicast_config,
             listener,
             ctx,

@@ -313,7 +313,7 @@ impl ProcessorSessionRecv {
                         debug!(target: "processor-recv",
                                "transaction reports causes effects");
 
-                        Err(XactError::Uncommitted)
+                        Err(XactError::EffectViolation)
                     }
                 }
             }
@@ -565,6 +565,7 @@ impl
         ProcessorSessionRecv
     > for ProcessorSession
 {
+    type Args = ();
     type Cleanup = ProcessorSessionCleanup;
     type Config = LargeObjProtoConfig<((), (), (), (), ()), ()>;
     type CreateError = LargeObjProtoCreateError<
@@ -573,6 +574,7 @@ impl
     type StartError = MutexPoison;
 
     fn create(
+        _args: (),
         config: Self::Config
     ) -> Result<
         (
@@ -669,6 +671,7 @@ impl Standalone for StandaloneProcessor {
                 };
                 let component = UnicastClientComponent::create(
                     client_config,
+                    (),
                     session_config,
                     listener,
                     shutdown,
