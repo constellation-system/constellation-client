@@ -337,11 +337,12 @@ impl ProcessorSessionRecv {
     }
 
     fn run_committed(
-        &self,
+        &mut self,
         hash: SHA3ID,
+        round: u128,
         req: XactCommittedReq<TestPayload, TestEffects>
     ) -> XactNotify<u128, SHA3ID, TestResult, TestError> {
-        let (class, version, instance, _, effects, payload) = req.take();
+        let (class, version, instance, idx, effects, payload) = req.take();
 
         info!(target: "processor-recv",
               "processing transaction {}",
@@ -393,10 +394,13 @@ impl ProcessorSessionRecv {
 
         match res {
             Ok(res) => {
+                let when = XactLinPoint::new(round, idx);
                 let state = XactNotifyState::Success {
                     result: Some(res),
-                    when: self.when.clone()
+                    when: when.clone()
                 };
+
+                self.when = when;
 
                 XactNotify::new(hash, state)
             }
@@ -432,7 +436,7 @@ impl ProcessorSessionRecv {
     }
 
     fn process_committed_rounds(
-        &self,
+        &mut self,
         rounds: Vec<
             XactCommittedRound<
                 u128,
@@ -465,7 +469,7 @@ impl ProcessorSessionRecv {
                             let idx = req.idx() as usize;
 
                             if hashes.len() <= idx && hashes[idx] == hash {
-                                let res = self.run_committed(hash, req);
+                                let res = self.run_committed(hash, id, req);
 
                                 self.pending
                                     .lock()
@@ -504,7 +508,7 @@ impl ProcessorSessionRecv {
                 for req in reqs.into_iter() {
                     match codec.hash_committed(&req) {
                         Ok(hash) => {
-                            let res = self.run_committed(hash, req);
+                            let res = self.run_committed(hash, id, req);
 
                             self.pending
                                 .lock()
