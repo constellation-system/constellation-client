@@ -19,9 +19,9 @@
 use std::convert::Infallible;
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::fmt::Error;
 use std::fmt::Formatter;
 use std::hash::Hash;
+use std::io::Error;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -233,6 +233,7 @@ pub struct MulticastClientComponent<
         Epochs::Config,
         Endpoint
     >,
+    session_args: Session::Args,
     session_config: Session::Config,
     listener: ThreadedFlowsListener<
         <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
@@ -260,6 +261,7 @@ pub enum MulticastClientComponentRunError<Session, Multicast, Start> {
     Session { err: Session },
     Multicast { err: Multicast },
     Start { err: Start },
+    IO { err: Error },
     SkippedIdx
 }
 
@@ -399,6 +401,7 @@ where
             Epochs::Config,
             Endpoint
         >,
+        session_args: Session::Args,
         session_config: Session::Config,
         listener: ThreadedFlowsListener<
             <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
@@ -419,6 +422,7 @@ where
             resolver: PhantomData,
             session: PhantomData,
             config: config,
+            session_args: session_args,
             session_config: session_config,
             listener: listener,
             shutdown: shutdown,
@@ -470,6 +474,7 @@ where
         >
     >{
         let MulticastClientComponent {
+            session_args,
             session_config,
             config,
             listener,
@@ -482,9 +487,9 @@ where
               "starting multicast client component");
 
         let (self_party, multicast_config) = config.take();
-        let (session, notify, proto) = Session::create(session_config)
-            .map_err(|err| MulticastClientComponentRunError::Session {
-                err: err
+        let (session, notify, proto) =
+            Session::create(session_args, session_config).map_err(|err| {
+                MulticastClientComponentRunError::Session { err: err }
             })?;
         let multicast: MulticastLargeObjBus<
             _,
@@ -504,7 +509,7 @@ where
             _,
             _
         > = MulticastLargeObjBus::create(
-            self_party.clone(),
+            Some(self_party.clone()),
             multicast_config,
             listener,
             ctx,
@@ -523,7 +528,9 @@ where
         debug!(target: "multicast-client-component",
                "starting multicaster");
 
-        let multicast_cleanup = multicast.start();
+        let multicast_cleanup = multicast
+            .start()
+            .map_err(|err| MulticastClientComponentRunError::IO { err: err })?;
 
         Ok(MulticastClientComponentCleanup {
             shutdown: shutdown,
@@ -560,11 +567,14 @@ where
     fn fmt(
         &self,
         f: &mut Formatter<'_>
-    ) -> Result<(), Error> {
+    ) -> Result<(), std::fmt::Error> {
         match self {
             MulticastClientComponentRunError::Session { err } => err.fmt(f),
             MulticastClientComponentRunError::Multicast { err } => err.fmt(f),
             MulticastClientComponentRunError::Start { err } => err.fmt(f),
+            MulticastClientComponentRunError::IO { err } => {
+                write!(f, "{}", err)
+            }
             MulticastClientComponentRunError::SkippedIdx => {
                 write!(f, "stream parties skipped an index")
             }
@@ -630,7 +640,7 @@ impl Display for TestCred {
     fn fmt(
         &self,
         f: &mut Formatter<'_>
-    ) -> Result<(), Error> {
+    ) -> Result<(), std::fmt::Error> {
         match self {
             TestCred::IP { addr } => write!(f, "ip://{}", addr),
             TestCred::Unix { addr } => write!(f, "unix://{}", addr)

@@ -52,11 +52,13 @@ pub trait MulticastClientSession<
     H: Clone + Default + HashAlgo + Send,
     H::HashID: Clone + Display + Hash + HashID + Eq {
     type Config;
+    type Args;
     type CreateError: Display;
     type StartError: Display;
     type Cleanup: ClientSessionCleanup;
 
     fn create(
+        args: Self::Args,
         config: Self::Config
     ) -> Result<
         (
@@ -104,12 +106,14 @@ pub trait UnicastClientSession<
     <WrapperCodec as Codec<Wrapper>>::Param: Default,
     H: Clone + Default + HashAlgo + Send,
     H::HashID: Clone + Display + Hash + HashID + Eq {
+    type Args;
     type Config;
     type CreateError: Display;
     type StartError: Display;
     type Cleanup: ClientSessionCleanup;
 
     fn create(
+        args: Self::Args,
         config: Self::Config
     ) -> Result<
         (

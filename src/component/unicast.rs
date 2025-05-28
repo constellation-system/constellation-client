@@ -19,9 +19,9 @@
 use std::convert::Infallible;
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::fmt::Error;
 use std::fmt::Formatter;
 use std::hash::Hash;
+use std::io::Error;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 
@@ -235,6 +235,7 @@ pub struct UnicastClientComponent<
         Epochs::Config,
         Endpoint
     >,
+    session_args: Session::Args,
     session_config: Session::Config,
     listener: ThreadedFlowsListener<
         <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
@@ -262,6 +263,7 @@ pub enum UnicastClientComponentRunError<Session, Unicast, Start> {
     Session { err: Session },
     Unicast { err: Unicast },
     Start { err: Start },
+    IO { err: Error },
     SkippedIdx
 }
 
@@ -401,6 +403,7 @@ where
             Epochs::Config,
             Endpoint
         >,
+        session_args: Session::Args,
         session_config: Session::Config,
         listener: ThreadedFlowsListener<
             <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
@@ -421,6 +424,7 @@ where
             resolver: PhantomData,
             session: PhantomData,
             config: config,
+            session_args: session_args,
             session_config: session_config,
             listener: listener,
             shutdown: shutdown,
@@ -473,6 +477,7 @@ where
     >{
         let UnicastClientComponent {
             config,
+            session_args,
             session_config,
             listener,
             ctx,
@@ -484,9 +489,9 @@ where
               "starting unicast client component");
 
         let unicast_config = config.take();
-        let (session, notify, proto) = Session::create(session_config)
-            .map_err(|err| UnicastClientComponentRunError::Session {
-                err: err
+        let (session, notify, proto) =
+            Session::create(session_args, session_config).map_err(|err| {
+                UnicastClientComponentRunError::Session { err: err }
             })?;
         let unicast: UnicastLargeObjBus<
             _,
@@ -521,7 +526,9 @@ where
         debug!(target: "unicast-client-component",
                "starting unicaster");
 
-        let unicast_cleanup = unicast.start();
+        let unicast_cleanup = unicast
+            .start()
+            .map_err(|err| UnicastClientComponentRunError::IO { err: err })?;
 
         Ok(UnicastClientComponentCleanup {
             shutdown: shutdown,
@@ -558,11 +565,12 @@ where
     fn fmt(
         &self,
         f: &mut Formatter<'_>
-    ) -> Result<(), Error> {
+    ) -> Result<(), std::fmt::Error> {
         match self {
             UnicastClientComponentRunError::Session { err } => err.fmt(f),
             UnicastClientComponentRunError::Unicast { err } => err.fmt(f),
             UnicastClientComponentRunError::Start { err } => err.fmt(f),
+            UnicastClientComponentRunError::IO { err } => write!(f, "{}", err),
             UnicastClientComponentRunError::SkippedIdx => {
                 write!(f, "stream parties skipped an index")
             }
@@ -628,7 +636,7 @@ impl Display for TestCred {
     fn fmt(
         &self,
         f: &mut Formatter<'_>
-    ) -> Result<(), Error> {
+    ) -> Result<(), std::fmt::Error> {
         match self {
             TestCred::IP { addr } => write!(f, "ip://{}", addr),
             TestCred::Unix { addr } => write!(f, "unix://{}", addr)

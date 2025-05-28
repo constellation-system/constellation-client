@@ -77,3 +77,4 @@ serde = { version = "1.0", features = ["derive"] }
 constellation-standalone = { git = "https://github.com/constellation-system/constellation-standalone.git", branch = "project/ioc", default-features = false }
 env_logger = { version = "0.10" }
 serde_yaml = { version = "0.9" }
+uuid = { version = "1.16", features = ["serde", "v5"] }
