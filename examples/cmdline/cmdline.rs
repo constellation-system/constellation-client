@@ -357,7 +357,7 @@ impl
 
 impl LargeObjMsgs<SHA3Algo, TestBatch> for CmdlineSessionMsgs {
     type AddMsgsError<Encode>
-        = LargeObjProtoAddOutboundError<SHA3ID, Encode>
+        = LargeObjProtoAddOutboundError<Encode>
     where
         Encode: Display + ScopedError;
 

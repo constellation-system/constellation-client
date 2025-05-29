@@ -228,7 +228,7 @@ impl ProcessorSessionMsgs {
 
 impl LargeObjMsgs<SHA3Algo, TestBatch> for ProcessorSessionMsgs {
     type AddMsgsError<Encode>
-        = WithMutexPoison<LargeObjProtoAddOutboundError<SHA3ID, Encode>>
+        = WithMutexPoison<LargeObjProtoAddOutboundError<Encode>>
     where
         Encode: Display + ScopedError;
 
