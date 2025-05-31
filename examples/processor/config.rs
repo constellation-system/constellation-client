@@ -29,6 +29,7 @@ use constellation_common::hashid::SHA3Algo;
 use constellation_common::hashid::SHA3ID;
 use constellation_common::ids::AscendingCount;
 use constellation_common::ids::IDGen;
+use constellation_common::retry::Retry;
 use constellation_streams::config::LargeObjProtoConfig;
 use constellation_streams::large_obj::LargeObjID;
 use constellation_streams::large_obj::LargeObjMsg;
@@ -61,7 +62,11 @@ pub struct ProcessorConfig {
         CompoundFarEndpoint
     >,
     #[serde(default)]
-    session: LargeObjProtoConfig<((), (), (), (), ()), ()>
+    session: LargeObjProtoConfig<((), (), (), (), ()), ()>,
+    #[serde(default = "ProcessorConfig::default_retry")]
+    retry: Retry,
+    #[serde(default = "ProcessorConfig::default_resubmit")]
+    resubmit: Retry
 }
 
 impl ProcessorConfig {
@@ -79,8 +84,25 @@ impl ProcessorConfig {
             <AscendingCount<LargeObjID> as IDGen>::Config,
             CompoundFarEndpoint
         >,
-        LargeObjProtoConfig<((), (), (), (), ()), ()>
+        LargeObjProtoConfig<((), (), (), (), ()), ()>,
+        Retry,
+        Retry
     ){
-        (self.name_caches, self.registry, self.unicast, self.session)
+        (
+            self.name_caches,
+            self.registry,
+            self.unicast,
+            self.session,
+            self.retry,
+            self.resubmit
+        )
+    }
+
+    fn default_resubmit() -> Retry {
+        Retry::TERRESTRIAL_LARGE_OBJ_RESUB_DEFAULT
+    }
+
+    fn default_retry() -> Retry {
+        Retry::TERRESTRIAL_NETWORK_DEFAULT
     }
 }
