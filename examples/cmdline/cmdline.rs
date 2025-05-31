@@ -23,9 +23,9 @@ use std::fmt::Error;
 use std::fmt::Formatter;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::RwLock;
 use std::thread::JoinHandle;
-use std::time::Duration;
 use std::time::Instant;
 
 use clap::Arg;
@@ -57,10 +57,12 @@ use constellation_common::codec::Codec;
 use constellation_common::error::ErrorScope;
 use constellation_common::error::MutexPoison;
 use constellation_common::error::ScopedError;
+use constellation_common::error::WithMutexPoison;
 use constellation_common::hashid::SHA3Algo;
 use constellation_common::hashid::SHA3ID;
 use constellation_common::ids::AscendingCount;
 use constellation_common::net::IPEndpointAddr;
+use constellation_common::retry::Retry;
 use constellation_common::shutdown::ShutdownFlag;
 use constellation_common::sync::Notify;
 use constellation_common::version::FullVersion;
@@ -70,6 +72,7 @@ use constellation_component_common::config::PartiesConfig;
 use constellation_component_common::xact::XactBatch;
 use constellation_component_common::xact::XactBatchCodec;
 use constellation_component_common::xact::XactEffects;
+use constellation_component_common::xact::XactNotifyState;
 use constellation_component_common::xact::XactSealed;
 use constellation_component_common::xact::XactUncommittedReq;
 use constellation_component_common::PartyStreamIdx;
@@ -109,6 +112,131 @@ pub enum CmdlineMode {
         correct: bool,
         error: bool
     }
+}
+
+pub struct CmdlineSession {
+    parties: Arc<RwLock<Vec<PartyStreamIdx>>>
+}
+
+pub struct CmdlineMsgState {
+    version: Version,
+    when: Instant,
+    uuid: Uuid,
+    nretries: usize
+}
+
+pub struct CmdlineState {
+    msg: Mutex<Option<CmdlineMsgState>>,
+    resubmit: Retry,
+    retry: Retry
+}
+
+pub struct CmdlineArgs {
+    mode: CmdlineMode,
+    resubmit: Retry,
+    retry: Retry
+}
+
+impl CmdlineState {
+    fn get_batch(
+        &self,
+        mode: &CmdlineMode
+    ) -> Result<(Option<TestBatch>, Option<Instant>), MutexPoison> {
+        if let Some(msg) = &mut *self.msg.lock().map_err(|_| MutexPoison)? {
+            let now = Instant::now();
+
+            if now >= msg.when {
+                debug!(target: "cmdline-msgs",
+                       "generating outgoing batch");
+
+                let req = mode.req(&msg.uuid, &msg.version);
+                let sealed = XactSealed::new(TestSeal, req);
+                let batch = XactBatch::new(vec![], vec![sealed], vec![]);
+                let duration = self.resubmit.retry_delay(msg.nretries);
+                let when = now + duration;
+
+                msg.when = when;
+                msg.nretries += 1;
+
+                Ok((Some(batch), Some(when)))
+            } else {
+                Ok((None, Some(msg.when)))
+            }
+        } else {
+            Ok((None, None))
+        }
+    }
+
+    fn notify(&self) -> Result<Option<Instant>, MutexPoison> {
+        if let Some(msg) = &mut *self.msg.lock().map_err(|_| MutexPoison)? {
+            let now = Instant::now();
+            let duration = self.resubmit.retry_delay(msg.nretries);
+            let when = now + duration;
+
+            msg.when = when;
+
+            Ok(Some(when))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn complete(&self) -> Result<(), MutexPoison> {
+        *self.msg.lock().map_err(|_| MutexPoison)? = None;
+
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct CmdlineSessionMsgs {
+    state: Arc<CmdlineState>,
+    mode: CmdlineMode
+}
+
+#[derive(Clone)]
+pub struct CmdlineSessionRecv {
+    state: Arc<CmdlineState>
+}
+
+#[derive(Clone)]
+pub struct CmdlineSessionCleanup;
+
+pub enum CmdlineSessionError {
+    SkippedIdx
+}
+
+pub struct StandaloneCreateCleanup {
+    shutdown: ShutdownFlag,
+    caches_join: JoinHandle<()>
+}
+
+pub type StandaloneRegistry = CompoundFarChannelRegistry<
+    Arc<TestAuthN<String, TestCred>>,
+    UnixDatagramXfrm,
+    UDPDatagramXfrm,
+    FarChannelRegistryID
+>;
+
+pub struct StandaloneCtx {
+    caches: ThreadedNSNameCaches,
+    registry: Arc<StandaloneRegistry>
+}
+
+pub struct StandaloneCmdline {
+    component: CompoundMulticastClientComponent<
+        TestBatch,
+        TestBatch,
+        PassthruMsgAuthN<TestBatch, String>,
+        TestBatchCodec,
+        SHA3Algo,
+        AscendingCount<LargeObjID>,
+        CmdlineSessionMsgs,
+        CmdlineSessionRecv,
+        CmdlineSession,
+        AscendingCount<u128>,
+        StandaloneCtx
+    >
 }
 
 impl CmdlineMode {
@@ -229,76 +357,9 @@ impl CmdlineMode {
     }
 }
 
-pub struct CmdlineSession {
-    parties: Arc<RwLock<Vec<PartyStreamIdx>>>
-}
-
-#[derive(Clone)]
-pub struct CmdlineSessionMsgs {
-    mode: CmdlineMode,
-    version: Version,
-    hash: SHA3Algo,
-    when: Instant,
-    uuid: Uuid,
-    count: u64
-}
-
-#[derive(Clone)]
-pub struct CmdlineSessionRecv;
-
-#[derive(Clone)]
-pub struct CmdlineSessionCleanup;
-
-pub enum CmdlineSessionError {
-    SkippedIdx
-}
-
-pub struct StandaloneCreateCleanup {
-    shutdown: ShutdownFlag,
-    caches_join: JoinHandle<()>
-}
-
-pub type StandaloneRegistry = CompoundFarChannelRegistry<
-    Arc<TestAuthN<String, TestCred>>,
-    UnixDatagramXfrm,
-    UDPDatagramXfrm,
-    FarChannelRegistryID
->;
-
-pub struct StandaloneCtx {
-    caches: ThreadedNSNameCaches,
-    registry: Arc<StandaloneRegistry>
-}
-
-pub struct StandaloneCmdline {
-    component: CompoundMulticastClientComponent<
-        TestBatch,
-        TestBatch,
-        PassthruMsgAuthN<TestBatch, String>,
-        TestBatchCodec,
-        SHA3Algo,
-        AscendingCount<LargeObjID>,
-        CmdlineSessionMsgs,
-        CmdlineSessionRecv,
-        CmdlineSession,
-        AscendingCount<u128>,
-        StandaloneCtx
-    >
-}
-
-impl Default for CmdlineSessionRecv {
+impl CmdlineMsgState {
     #[inline]
-    fn default() -> Self {
-        CmdlineSessionRecv
-    }
-}
-
-impl CmdlineSessionMsgs {
-    #[inline]
-    fn new(
-        mode: CmdlineMode,
-        hash: SHA3Algo
-    ) -> Self {
+    fn new() -> Self {
         let uuid =
             Uuid::new_v5(&Uuid::NAMESPACE_DNS, TEST_SERVICE_NAME.as_bytes());
 
@@ -306,13 +367,27 @@ impl CmdlineSessionMsgs {
                "service UUID: {}",
                uuid);
 
-        CmdlineSessionMsgs {
+        CmdlineMsgState {
             when: Instant::now(),
+            nretries: 0,
             version: TEST_VERSION,
-            mode: mode,
-            uuid: uuid,
-            hash: hash,
-            count: 0
+            uuid: uuid
+        }
+    }
+}
+
+impl CmdlineState {
+    #[inline]
+    fn new(
+        retry: Retry,
+        resubmit: Retry
+    ) -> Self {
+        let msg = Mutex::new(Some(CmdlineMsgState::new()));
+
+        CmdlineState {
+            msg: msg,
+            retry: retry,
+            resubmit: resubmit
         }
     }
 }
@@ -357,7 +432,7 @@ impl
 
 impl LargeObjMsgs<SHA3Algo, TestBatch> for CmdlineSessionMsgs {
     type AddMsgsError<Encode>
-        = LargeObjProtoAddOutboundError<Encode>
+        = WithMutexPoison<LargeObjProtoAddOutboundError<Encode>>
     where
         Encode: Display + ScopedError;
 
@@ -369,29 +444,23 @@ impl LargeObjMsgs<SHA3Algo, TestBatch> for CmdlineSessionMsgs {
         WrapperCodec: Clone + Codec<TestBatch>,
         WrapperCodec::Param: Default,
         F: Frags {
-        let now = Instant::now();
+        let (batch, when) = self
+            .state
+            .get_batch(&self.mode)
+            .map_err(|_| WithMutexPoison::MutexPoison)?;
 
-        if now >= self.when {
-            debug!(target: "cmdline-msgs",
-                   "generating outgoing batch, seqnum {}",
-                   self.count);
-
-            let req = self.mode.req(&self.uuid, &self.version);
-            let sealed = XactSealed::new(TestSeal, req);
-            let batch = XactBatch::new(vec![], vec![sealed], vec![]);
-
-            sender.add_outbound(&batch)?;
-            self.count += 1;
-
-            self.when = now + Duration::from_secs(5);
+        if let Some(batch) = batch {
+            sender
+                .add_outbound(&batch)
+                .map_err(|err| WithMutexPoison::Inner { error: err })?;
         }
 
-        Ok(None)
+        Ok(when)
     }
 }
 
 impl AuthNMsgRecv<String, TestBatch> for CmdlineSessionRecv {
-    type RecvError = Infallible;
+    type RecvError = MutexPoison;
 
     fn recv_auth_msg(
         &mut self,
@@ -409,6 +478,16 @@ impl AuthNMsgRecv<String, TestBatch> for CmdlineSessionRecv {
         }
 
         for notify in msg.notifies() {
+            match notify.state() {
+                XactNotifyState::Success { .. } |
+                XactNotifyState::Error { .. } => {
+                    self.state.complete()?;
+                }
+                _ => {
+                    self.state.notify()?;
+                }
+            }
+
             info!(target: "cmdline-recv",
                   "notification for {}: {}",
                   notify.hash(), notify.state())
@@ -430,7 +509,7 @@ impl
         CmdlineSessionRecv
     > for CmdlineSession
 {
-    type Args = CmdlineMode;
+    type Args = CmdlineArgs;
     type Cleanup = CmdlineSessionCleanup;
     type Config = LargeObjProtoConfig<((), (), (), (), ()), ()>;
     type CreateError = LargeObjProtoCreateError<
@@ -439,7 +518,7 @@ impl
     type StartError = MutexPoison;
 
     fn create(
-        mode: CmdlineMode,
+        args: CmdlineArgs,
         config: Self::Config
     ) -> Result<
         (
@@ -460,10 +539,21 @@ impl
         ),
         Self::CreateError
     > {
+        let CmdlineArgs {
+            mode,
+            retry,
+            resubmit
+        } = args;
+        let state = Arc::new(CmdlineState::new(retry, resubmit));
         let hash = SHA3Algo::default();
         let authn = PassthruMsgAuthN::default();
-        let msgs = CmdlineSessionMsgs::new(mode, hash.clone());
-        let recv = CmdlineSessionRecv::default();
+        let msgs = CmdlineSessionMsgs {
+            state: state.clone(),
+            mode: mode
+        };
+        let recv = CmdlineSessionRecv {
+            state: state.clone()
+        };
         let notify = Notify::new();
         let proto = LargeObjProto::create(
             config,
@@ -516,7 +606,9 @@ impl Standalone for StandaloneCmdline {
             name_caches_config,
             registry_config,
             client_config,
-            session_config
+            session_config,
+            retry,
+            resubmit
         ) = config.take();
         let shutdown = ShutdownFlag::new();
         let (mut caches, caches_join) =
@@ -610,9 +702,14 @@ impl Standalone for StandaloneCmdline {
                                 error: error,
                                 hard: hard
                             };
+                            let args = CmdlineArgs {
+                                mode: mode,
+                                retry: retry,
+                                resubmit: resubmit
+                            };
                             let component = MulticastClientComponent::create(
                                 client_config,
-                                mode,
+                                args,
                                 session_config,
                                 listener,
                                 shutdown,
@@ -629,9 +726,14 @@ impl Standalone for StandaloneCmdline {
                                 correct: correct,
                                 error: error
                             };
+                            let args = CmdlineArgs {
+                                mode: mode,
+                                retry: retry,
+                                resubmit: resubmit
+                            };
                             let component = MulticastClientComponent::create(
                                 client_config,
-                                mode,
+                                args,
                                 session_config,
                                 listener,
                                 shutdown,
@@ -649,9 +751,14 @@ impl Standalone for StandaloneCmdline {
                                 error: error,
                                 hard: hard
                             };
+                            let args = CmdlineArgs {
+                                mode: mode,
+                                retry: retry,
+                                resubmit: resubmit
+                            };
                             let component = MulticastClientComponent::create(
                                 client_config,
-                                mode,
+                                args,
                                 session_config,
                                 listener,
                                 shutdown,

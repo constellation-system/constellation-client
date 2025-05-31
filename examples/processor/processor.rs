@@ -16,12 +16,12 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::Infallible;
 use std::fmt::Display;
 use std::fmt::Error;
 use std::fmt::Formatter;
-use std::ops::DerefMut;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread::JoinHandle;
@@ -56,6 +56,7 @@ use constellation_common::error::WithMutexPoison;
 use constellation_common::hashid::SHA3Algo;
 use constellation_common::hashid::SHA3ID;
 use constellation_common::ids::AscendingCount;
+use constellation_common::retry::Retry;
 use constellation_common::shutdown::ShutdownFlag;
 use constellation_common::sync::Notify;
 use constellation_common::version::FullVersion;
@@ -86,6 +87,7 @@ use constellation_streams::large_obj::LargeObjSender;
 use log::debug;
 use log::error;
 use log::info;
+use log::trace;
 use log::warn;
 use uuid::Uuid;
 
@@ -93,21 +95,38 @@ use crate::config::ProcessorConfig;
 
 pub struct ProcessorSession;
 
+pub struct ProcessorNotifyState {
+    msg: XactNotify<u128, SHA3ID, TestResult, TestError>,
+    nretries: usize,
+    when: Instant
+}
+
+pub struct ProcessorState {
+    pending: Mutex<HashMap<SHA3ID, ProcessorNotifyState>>,
+    retry: Retry,
+    resubmit: Retry
+}
+
 #[derive(Clone)]
 pub struct ProcessorSessionMsgs {
-    pending: Arc<Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>>,
-    // XXX this is a hack to get the demo working; replace with a
-    // processor capability reporting message of some kind.
+    state: Arc<ProcessorState>,
+    // XXX this is a hack; eventually, we'll send a registration
+    // message of some kind.
     first: bool
 }
 
 #[derive(Clone)]
 pub struct ProcessorSessionRecv {
+    state: Arc<ProcessorState>,
     class: Uuid,
     version: Version,
-    pending: Arc<Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>>,
     when: XactLinPoint<u128>,
     notify: Notify
+}
+
+pub struct ProcessorArgs {
+    resubmit: Retry,
+    retry: Retry
 }
 
 pub struct ProcessorSessionCleanup;
@@ -181,48 +200,92 @@ impl
     }
 }
 
-impl ProcessorSessionMsgs {
-    #[inline]
-    fn new(
-        pending: Arc<
-            Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>
-        >
-    ) -> Self {
-        ProcessorSessionMsgs {
-            pending: pending,
-            first: true
+impl ProcessorNotifyState {
+    fn get_notify(
+        &mut self,
+        resubmit: &Retry,
+        now: Instant
+    ) -> (
+        Option<XactNotify<u128, SHA3ID, TestResult, TestError>>,
+        Instant
+    ) {
+        if self.when <= now {
+            let duration = resubmit.retry_delay(self.nretries);
+            let when = now + duration;
+
+            self.nretries += 1;
+            self.when = when;
+
+            (Some(self.msg.clone()), when)
+        } else {
+            (None, self.when)
         }
     }
 }
 
-impl ProcessorSessionRecv {
-    #[inline]
-    fn new(
-        class: Uuid,
-        version: Version,
-        pending: Arc<
-            Mutex<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>>
-        >,
-        notify: Notify
-    ) -> Self {
-        ProcessorSessionRecv {
-            class: class,
-            version: version,
-            pending: pending,
-            notify: notify,
-            when: XactLinPoint::new(0, 0)
-        }
-    }
-}
-
-impl ProcessorSessionMsgs {
-    fn get_msgs(
+impl ProcessorState {
+    fn get_notifies(
         &self
-    ) -> Result<Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>, MutexPoison>
-    {
+    ) -> Result<
+        (
+            Vec<XactNotify<u128, SHA3ID, TestResult, TestError>>,
+            Option<Instant>
+        ),
+        MutexPoison
+    > {
+        let mut guard = self.pending.lock().map_err(|_| MutexPoison)?;
+        let mut notifies = Vec::with_capacity(guard.len());
+        let now = Instant::now();
+        let mut min = None;
+
+        for elem in guard.values_mut() {
+            let (notify, when) = elem.get_notify(&self.resubmit, now);
+
+            if let Some(notify) = notify {
+                notifies.push(notify)
+            }
+
+            min = Some(min.map_or(when, |curr: Instant| curr.min(when)));
+        }
+
+        Ok((notifies, min))
+    }
+
+    fn add_notify(
+        &self,
+        hash: SHA3ID,
+        msg: XactNotify<u128, SHA3ID, TestResult, TestError>
+    ) -> Result<(), MutexPoison> {
         let mut guard = self.pending.lock().map_err(|_| MutexPoison)?;
 
-        Ok(std::mem::replace(guard.deref_mut(), Vec::new()))
+        if !guard.contains_key(&hash) {
+            trace!(target: "processor-state",
+                   "adding notifiction for {}",
+                   hash);
+
+            let ent = ProcessorNotifyState {
+                when: Instant::now(),
+                nretries: 0,
+                msg: msg
+            };
+
+            guard.insert(hash, ent);
+        } else {
+            trace!(target: "processor-state",
+                   "notifiction for {} already existed",
+                   hash);
+        }
+
+        Ok(())
+    }
+
+    fn ack(
+        &self,
+        hash: &SHA3ID
+    ) -> Result<(), MutexPoison> {
+        self.pending.lock().map_err(|_| MutexPoison)?.remove(hash);
+
+        Ok(())
     }
 }
 
@@ -240,22 +303,22 @@ impl LargeObjMsgs<SHA3Algo, TestBatch> for ProcessorSessionMsgs {
         WrapperCodec: Clone + Codec<TestBatch>,
         WrapperCodec::Param: Default,
         F: Frags {
-        let msgs = self.get_msgs()?;
+        let (notifies, when) = self.state.get_notifies()?;
 
-        if self.first || msgs.len() != 0 {
+        if self.first || notifies.len() != 0 {
             debug!(target: "processor-session-msgs",
                    "sending {} notifies",
-                   msgs.len());
+                   notifies.len());
 
-            let batch = XactHashBatch::new(vec![], vec![], msgs);
+            let batch = XactHashBatch::new(vec![], vec![], notifies);
 
-            self.first = false;
             sender
                 .add_outbound(&batch)
                 .map_err(|err| WithMutexPoison::Inner { error: err })?;
+            self.first = false;
         }
 
-        Ok(None)
+        Ok(when)
     }
 }
 
@@ -420,19 +483,21 @@ impl ProcessorSessionRecv {
                 XactUncommittedHashReq<u128, SHA3ID, TestPayload, TestEffects>
             >
         >
-    ) -> Result<(), MutexPoison> {
+    ) -> Result<bool, MutexPoison> {
+        let mut notify = false;
+
         info!(target: "processor-recv",
               "processing uncommitted transactions");
 
         for req in reqs {
             let res = self.run_uncommitted(req);
-            let mut guard = self.pending.lock().map_err(|_| MutexPoison)?;
+            let hash = res.hash().clone();
 
-            guard.push(res);
-            self.notify.notify().map_err(|_| MutexPoison)?;
+            self.state.add_notify(hash, res)?;
+            notify = true;
         }
 
-        Ok(())
+        Ok(notify)
     }
 
     fn process_committed_rounds(
@@ -446,9 +511,10 @@ impl ProcessorSessionRecv {
                 TestEffects
             >
         >
-    ) -> Result<(), MutexPoison> {
+    ) -> Result<bool, MutexPoison> {
         let mut codec = TestBatchCodec::create(((), (), (), (), ()))
             .expect("Expected success");
+        let mut notify = false;
 
         for round in rounds {
             let (id, seal, reqs) = round.take();
@@ -470,27 +536,18 @@ impl ProcessorSessionRecv {
 
                             if hashes.len() <= idx && hashes[idx] == hash {
                                 let res = self.run_committed(hash, id, req);
+                                let hash = res.hash().clone();
 
-                                self.pending
-                                    .lock()
-                                    .map_err(|_| MutexPoison)?
-                                    .push(res);
-                                self.notify
-                                    .notify()
-                                    .map_err(|_| MutexPoison)?;
+                                self.state.add_notify(hash, res)?;
                             } else {
                                 let state = XactNotifyState::Error {
                                     error: Some(XactError::HashMismatch)
                                 };
                                 let res = XactNotify::new(hash, state);
+                                let hash = res.hash().clone();
 
-                                self.pending
-                                    .lock()
-                                    .map_err(|_| MutexPoison)?
-                                    .push(res);
-                                self.notify
-                                    .notify()
-                                    .map_err(|_| MutexPoison)?;
+                                self.state.add_notify(hash, res)?;
+                                notify = true;
                             }
                         }
                         Err(err) => {
@@ -509,12 +566,10 @@ impl ProcessorSessionRecv {
                     match codec.hash_committed(&req) {
                         Ok(hash) => {
                             let res = self.run_committed(hash, id, req);
+                            let hash = res.hash().clone();
 
-                            self.pending
-                                .lock()
-                                .map_err(|_| MutexPoison)?
-                                .push(res);
-                            self.notify.notify().map_err(|_| MutexPoison)?;
+                            self.state.add_notify(hash, res)?;
+                            notify = true;
                         }
                         Err(err) => {
                             debug!(target: "processor-recv",
@@ -526,7 +581,7 @@ impl ProcessorSessionRecv {
             }
         }
 
-        Ok(())
+        Ok(notify)
     }
 }
 
@@ -539,18 +594,26 @@ impl AuthNMsgRecv<TestCred, TestBatch> for ProcessorSessionRecv {
         msg: TestBatch
     ) -> Result<(), Self::RecvError> {
         let (committed, uncommitted, notifies) = msg.take();
+        let mut notify = false;
 
         info!(target: "processor-recv",
               "received batch from {}",
               prin);
 
-        self.process_uncommitted_reqs(uncommitted)?;
-        self.process_committed_rounds(committed)?;
+        notify |= self.process_uncommitted_reqs(uncommitted)?;
+        notify |= self.process_committed_rounds(committed)?;
 
         for notify in notifies {
             warn!(target: "processor-recv",
                   "discarded notification for {}: {}",
                   notify.hash(), notify.state())
+        }
+
+        if notify {
+            trace!(target: "processor-recv",
+                   "notifying message thread");
+
+            self.notify.notify()?;
         }
 
         Ok(())
@@ -569,7 +632,7 @@ impl
         ProcessorSessionRecv
     > for ProcessorSession
 {
-    type Args = ();
+    type Args = ProcessorArgs;
     type Cleanup = ProcessorSessionCleanup;
     type Config = LargeObjProtoConfig<((), (), (), (), ()), ()>;
     type CreateError = LargeObjProtoCreateError<
@@ -578,7 +641,7 @@ impl
     type StartError = MutexPoison;
 
     fn create(
-        _args: (),
+        args: ProcessorArgs,
         config: Self::Config
     ) -> Result<
         (
@@ -599,16 +662,30 @@ impl
         ),
         Self::CreateError
     > {
+        let ProcessorArgs { retry, resubmit } = args;
         let class =
             Uuid::new_v5(&Uuid::NAMESPACE_DNS, TEST_SERVICE_NAME.as_bytes());
         let version = Version::new(0, 0, 0);
         let hash = SHA3Algo::default();
         let authn = PassthruMsgAuthN::default();
-        let pending = Arc::new(Mutex::new(Vec::new()));
         let notify = Notify::new();
-        let msgs = ProcessorSessionMsgs::new(pending.clone());
-        let recv =
-            ProcessorSessionRecv::new(class, version, pending, notify.clone());
+        let state = ProcessorState {
+            pending: Mutex::new(HashMap::new()),
+            resubmit: resubmit,
+            retry: retry
+        };
+        let state = Arc::new(state);
+        let msgs = ProcessorSessionMsgs {
+            state: state.clone(),
+            first: true
+        };
+        let recv = ProcessorSessionRecv {
+            state: state,
+            class: class,
+            version: version,
+            notify: notify.clone(),
+            when: XactLinPoint::new(0, 0)
+        };
         let proto = LargeObjProto::create(
             config,
             notify.clone(),
@@ -650,7 +727,9 @@ impl Standalone for StandaloneProcessor {
             name_caches_config,
             registry_config,
             client_config,
-            session_config
+            session_config,
+            resubmit,
+            retry
         ) = config.take();
         let shutdown = ShutdownFlag::new();
         let (mut caches, caches_join) =
@@ -673,9 +752,13 @@ impl Standalone for StandaloneProcessor {
                     registry: Arc::new(registry),
                     caches: caches
                 };
+                let args = ProcessorArgs {
+                    resubmit: resubmit,
+                    retry: retry
+                };
                 let component = UnicastClientComponent::create(
                     client_config,
-                    (),
+                    args,
                     session_config,
                     listener,
                     shutdown,
@@ -1070,10 +1153,6 @@ impl Codec<TestPayload> for TestPayloadCodec {
         &mut self,
         buf: &[u8]
     ) -> Result<(TestPayload, usize), Self::DecodeError> {
-        debug!(target: "processor",
-               "decoding {} bytes, {:?}",
-               buf.len(), buf);
-
         let effects_len = buf[0] as usize;
         let effects = buf[1..effects_len + 1].to_vec();
 
