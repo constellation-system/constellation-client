@@ -24,7 +24,8 @@ use serde::Serialize;
 #[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
 #[serde(rename = "multicast-client")]
 #[serde(rename_all = "kebab-case")]
-pub struct MulticastClientConfig<PartyID, Channels, Epochs, Endpoint>
+pub struct MulticastClientConfig<Session, Channels, Epochs,
+                                 PartyID, AuthN, Endpoint>
 where
     Channels: Default,
     Epochs: Default {
@@ -32,47 +33,66 @@ where
     #[serde(rename = "self")]
     self_party: PartyID,
     #[serde(flatten)]
-    multicast: MulticastLargeObjBusConfig<PartyID, Channels, Epochs, Endpoint>
+    multicast: MulticastLargeObjBusConfig<Channels, Epochs, PartyID,
+                                          AuthN, Endpoint>,
+    #[serde(flatten)]
+    session: Session
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
 #[serde(rename = "unicast-client")]
 #[serde(rename_all = "kebab-case")]
-pub struct UnicastClientConfig<Channels, Epochs, Endpoint>
+pub struct UnicastClientConfig<Session, Channels, Epochs, AuthN, Endpoint>
 where
     Channels: Default,
     Epochs: Default {
     #[serde(flatten)]
-    unicast: UnicastLargeObjBusConfig<Channels, Epochs, Endpoint>
+    unicast: UnicastLargeObjBusConfig<Channels, Epochs, AuthN, Endpoint>,
+    #[serde(flatten)]
+    session: Session
 }
 
-impl<Channels, Epochs, Endpoint> UnicastClientConfig<Channels, Epochs, Endpoint>
+impl<Session, Channels, Epochs, AuthN, Endpoint>
+    UnicastClientConfig<Session, Channels, Epochs, AuthN, Endpoint>
 where
     Channels: Default,
     Epochs: Default
 {
     #[inline]
     pub fn new(
-        unicast: UnicastLargeObjBusConfig<Channels, Epochs, Endpoint>
+        unicast: UnicastLargeObjBusConfig<Channels, Epochs, AuthN, Endpoint>,
+        session: Session
     ) -> Self {
-        UnicastClientConfig { unicast: unicast }
+        UnicastClientConfig {
+            unicast: unicast,
+            session: session
+        }
     }
 
     #[inline]
     pub fn unicast(
         &self
-    ) -> &UnicastLargeObjBusConfig<Channels, Epochs, Endpoint> {
+    ) -> &UnicastLargeObjBusConfig<Channels, Epochs, AuthN, Endpoint> {
         &self.unicast
     }
 
+
     #[inline]
-    pub fn take(self) -> UnicastLargeObjBusConfig<Channels, Epochs, Endpoint> {
-        self.unicast
+    pub fn session(&self) -> &Session {
+        &self.session
+    }
+
+    #[inline]
+    pub fn take(
+        self
+    ) -> (UnicastLargeObjBusConfig<Channels, Epochs, AuthN, Endpoint>,
+          Session) {
+        (self.unicast, self.session)
     }
 }
 
-impl<PartyID, Channels, Epochs, Endpoint>
-    MulticastClientConfig<PartyID, Channels, Epochs, Endpoint>
+impl<Session, Channels, Epochs, PartyID, AuthN, Endpoint>
+    MulticastClientConfig<Session, Channels, Epochs, PartyID, AuthN, Endpoint>
 where
     Channels: Default,
     Epochs: Default
@@ -80,16 +100,14 @@ where
     #[inline]
     pub fn new(
         self_party: PartyID,
-        multicast: MulticastLargeObjBusConfig<
-            PartyID,
-            Channels,
-            Epochs,
-            Endpoint
-        >
+        multicast: MulticastLargeObjBusConfig<Channels, Epochs, PartyID,
+                                              AuthN, Endpoint>,
+        session: Session
     ) -> Self {
         MulticastClientConfig {
             self_party: self_party,
-            multicast: multicast
+            multicast: multicast,
+            session: session
         }
     }
 
@@ -101,7 +119,8 @@ where
     #[inline]
     pub fn multicast(
         &self
-    ) -> &MulticastLargeObjBusConfig<PartyID, Channels, Epochs, Endpoint> {
+    ) -> &MulticastLargeObjBusConfig<Channels, Epochs, PartyID,
+                                     AuthN, Endpoint> {
         &self.multicast
     }
 
@@ -110,8 +129,10 @@ where
         self
     ) -> (
         PartyID,
-        MulticastLargeObjBusConfig<PartyID, Channels, Epochs, Endpoint>
+        MulticastLargeObjBusConfig<Channels, Epochs, PartyID,
+                                   AuthN, Endpoint>,
+        Session
     ) {
-        (self.self_party, self.multicast)
+        (self.self_party, self.multicast, self.session)
     }
 }

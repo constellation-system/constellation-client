@@ -16,244 +16,113 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
-use std::convert::Infallible;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
 use std::io::Error;
-use std::marker::PhantomData;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
-use constellation_auth::authn::AuthNMsgRecv;
-use constellation_auth::authn::MsgAuthN;
-use constellation_auth::authn::SessionAuthN;
-use constellation_auth::authn::TestAuthN;
 use constellation_auth::cred::SSLCred;
-use constellation_channels::config::ChannelRegistryChannelsConfig;
-use constellation_channels::config::CompoundFarEndpoint;
-use constellation_channels::config::ResolverConfig;
-use constellation_channels::far::compound::CompoundFarChannel;
 use constellation_channels::far::compound::CompoundFarChannelSessionCred;
-use constellation_channels::far::compound::CompoundFarChannelThreadedFlows;
-use constellation_channels::far::compound::CompoundFarChannelXfrm;
 use constellation_channels::far::compound::CompoundFarChannelXfrmPeerAddr;
 use constellation_channels::far::compound::CompoundFarIPChannelXfrmPeerAddr;
-use constellation_channels::far::flows::OwnedFlowNegotiator;
-use constellation_channels::far::flows::OwnedFlowsCreate;
-use constellation_channels::far::flows::ThreadedFlowsListener;
-use constellation_channels::far::registry::FarChannelRegistryAcquireError;
-use constellation_channels::far::registry::FarChannelRegistryChannelsCreateError;
-use constellation_channels::far::registry::FarChannelRegistryCtx;
-use constellation_channels::far::registry::FarChannelRegistryID;
-use constellation_channels::far::registry::RegistryAcquireError;
-use constellation_channels::far::udp::UDPDatagramXfrm;
-use constellation_channels::far::unix::UnixDatagramXfrm;
-use constellation_channels::far::FarChannelAcquired;
-use constellation_channels::far::FarChannelAcquiredResolve;
-use constellation_channels::far::FarChannelCreate;
-use constellation_channels::far::FarChannelFlowsError;
-use constellation_channels::far::FarChannelOwnedFlows;
 use constellation_channels::resolve::cache::NSNameCachesCtx;
-use constellation_channels::resolve::MixedResolver;
-use constellation_channels::unix::UnixSocketAddr;
-use constellation_common::codec::Codec;
-use constellation_common::hashid::HashAlgo;
-use constellation_common::ids::IDGen;
-use constellation_common::net::DatagramXfrm;
-use constellation_common::net::DatagramXfrmCreate;
-use constellation_common::net::IPEndpointAddr;
-use constellation_common::net::Socket;
+use constellation_common::config::CreateWithParam;
 use constellation_common::shutdown::ShutdownFlag;
-use constellation_component_common::bus::large_obj::multicast::MulticastLargeObjBus;
-use constellation_component_common::bus::large_obj::multicast::MulticastLargeObjBusCleanup;
-use constellation_component_common::bus::large_obj::multicast::MulticastLargeObjBusRunError;
-use constellation_streams::addrs::Addrs;
-use constellation_streams::addrs::AddrsCreate;
-use constellation_streams::channels::ChannelParam;
-use constellation_streams::large_obj::LargeObjID;
-use constellation_streams::large_obj::LargeObjMsgs;
+use constellation_component_common::config::MulticastLargeObjBusConfig;
+use constellation_component_common::bus::multicast::MulticastBus;
+use constellation_component_common::bus::multicast::MulticastBusCleanup;
+use constellation_component_common::bus::multicast::MulticastBusCreateError;
+use constellation_component_common::bus::multicast::MulticastBusTypes;
 use constellation_streams::select::StreamSelectorCreateError;
-use constellation_streams::select::ThreadedStreamSelectorError;
-use constellation_streams::stream::ConcurrentStream;
-use constellation_streams::stream::StreamID;
+use constellation_streams::threads::poll::PollThreadCreateError;
+use constellation_streams::threads::poll::PollThreadTypes;
 use log::debug;
 use log::info;
 
 use crate::config::MulticastClientConfig;
 use crate::session::ClientSessionCleanup;
+use crate::session::ClientSessionTypes;
 use crate::session::MulticastClientSession;
 
-pub type CompoundMulticastClientComponent<
-    Msg,
-    Wrapper,
-    MsgAuth,
-    WrapperCodec,
-    H,
-    IDs,
-    Msgs,
-    Recv,
-    Session,
-    Epochs,
-    Ctx
-> = MulticastClientComponent<
-    Msg,
-    Wrapper,
-    MsgAuth,
-    WrapperCodec,
-    H,
-    IDs,
-    Msgs,
-    Recv,
-    Session,
-    Epochs,
-    CompoundFarChannel,
-    CompoundFarChannelThreadedFlows<
-        Arc<TestAuthN<String, TestCred>>,
-        UnixDatagramXfrm,
-        UDPDatagramXfrm,
-        FarChannelRegistryID
-    >,
-    Arc<TestAuthN<String, TestCred>>,
-    CompoundFarChannelXfrm<UnixDatagramXfrm, UDPDatagramXfrm>,
-    Ctx,
-    MixedResolver<CompoundFarChannelXfrmPeerAddr, CompoundFarEndpoint>,
-    CompoundFarEndpoint
->;
+pub trait MulticastClientComponentTypes {
+    type Addr: 'static + Clone + Debug + Display + Eq + Hash + Send;
+    type Ctx: 'static + NSNameCachesCtx + Send;
+    type SessionPrin: Clone + Debug + Display + Eq + Hash;
+    type ChansConfig: Default;
+    type ChansCreateError: Debug + Display;
+    type MsgAuthConfig;
+    type MsgAuthCreateError: Debug + Display;
+    type ThreadTypes: PollThreadTypes<
+        Self::Ctx,
+        Addr = Self::Addr,
+        SessionPrin = Self::SessionPrin,
+        ChansConfig = Self::ChansConfig,
+        ChansCreateError = Self::ChansCreateError,
+        MsgAuthConfig = Self::MsgAuthConfig,
+        MsgAuthCreateError = Self::MsgAuthCreateError
+    >;
+    type EpochsConfig: Default;
+    type EpochsCreateError: Debug + Display;
+    type ModeCreateError: Debug + Display;
+    type ResolveCreateError: Debug + Display;
+    type BusTypes: MulticastBusTypes<
+        Self::Ctx,
+        SessionPrin = Self::SessionPrin,
+        ThreadTypes = Self::ThreadTypes,
+        EpochsConfig = Self::EpochsConfig,
+        EpochsCreateError = Self::EpochsCreateError,
+        ResolveCreateError = Self::ResolveCreateError,
+        ModeCreateError = Self::ModeCreateError,
+        ChansCreateError = Self::ChansCreateError,
+        MsgAuthCreateError = Self::MsgAuthCreateError
+    > + Send;
+    type SessionArgs;
+    type SessionConfig;
+    type SessionTypes: ClientSessionTypes<
+        SessionPrin = Self::SessionPrin
+    >;
+    type SessionCleanup: ClientSessionCleanup;
+    type SessionCreateError: Debug + Display;
+    type SessionStartError: Debug + Display;
+    type Session: MulticastClientSession<
+        Self::SessionArgs,
+        Self::SessionPrin,
+        Cleanup = Self::SessionCleanup,
+        StartError = Self::SessionStartError,
+        Config = Self::SessionConfig,
+        CreateError = Self::SessionCreateError
+    >;
+}
 
-pub struct MulticastClientComponent<
-    Msg,
-    Wrapper,
-    MsgAuth,
-    WrapperCodec,
-    H,
-    IDs,
-    Msgs,
-    Recv,
-    Session,
-    Epochs,
-    Channel,
-    F,
-    SessionAuth,
-    Xfrm,
-    Ctx,
-    Resolver,
-    Endpoint
-> where
-    Recv: Clone + AuthNMsgRecv<MsgAuth::Prin, Msg> + Send,
-    Msgs: Clone + LargeObjMsgs<H, Wrapper> + Send,
-    IDs: Clone + IDGen + Iterator<Item = LargeObjID> + Send,
-    MsgAuth:
-        Clone + MsgAuthN<Msg, Wrapper, SessionPrin = SessionAuth::Prin> + Send,
-    MsgAuth::SessionPrin: Send + Sync,
-    Msg: Clone + Send,
-    Wrapper: Clone + Send,
-    WrapperCodec: Clone + Codec<Wrapper> + Send,
-    <WrapperCodec as Codec<Wrapper>>::Param: Default,
-    H: Clone + Default + HashAlgo + Send,
-    H::HashID: Clone + Display + Hash + Eq + Send,
-    Session: MulticastClientSession<
-        H,
-        Msg,
-        Wrapper,
-        MsgAuth,
-        WrapperCodec,
-        IDs,
-        Msgs,
-        Recv
+pub struct MulticastClientComponent<Types>
+where
+    Types: MulticastClientComponentTypes {
+    config: MulticastLargeObjBusConfig<
+        Types::ChansConfig,
+        Types::EpochsConfig,
+        Types::SessionPrin,
+        Types::MsgAuthConfig,
+        Types::Addr
     >,
-    Epochs: 'static + IDGen + Iterator<Item = u128> + Send + Sync,
-    Epochs::Item: Clone + Default + Display + Ord + Send,
-    SessionAuth: Clone
-        + SessionAuthN<<Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow>
-        + Send
-        + Sync,
-    SessionAuth::Prin: 'static + Clone + Display + Eq + Hash + Send + Sync,
-    Channel: FarChannelOwnedFlows<F, SessionAuth, Xfrm>
-        + FarChannelCreate
-        + Send
-        + Sync,
-    Channel::Acquired: FarChannelAcquiredResolve<Resolved = Channel::Param>,
-    Channel::Param: 'static
-        + Clone
-        + Display
-        + Eq
-        + Hash
-        + PartialEq
-        + ChannelParam<<Channel::Xfrm as DatagramXfrm>::PeerAddr>
-        + Send
-        + Sync,
-    Channel::Acquired:
-        FarChannelAcquiredResolve<Resolved = Channel::Param> + Send + Sync,
-    <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow:
-        ConcurrentStream + Send,
-    <Channel::Xfrm as DatagramXfrm>::PeerAddr: Eq + Hash + Send + Sync,
-    F: OwnedFlowsCreate<
-            Channel::Socket,
-            Channel::Nego,
-            SessionAuth,
-            Channel::Xfrm
-        > + Send,
-    F::Flow: 'static + ConcurrentStream + Send,
-    F::CreateParam: Clone + Default + Send + Sync,
-    F::Reporter: Clone + Send + Sync,
-    F::ChannelID: From<usize> + Into<usize> + Send + Sync,
-    Xfrm:
-        DatagramXfrm + DatagramXfrmCreate<Addr = Channel::Param> + Send + Sync,
-    Xfrm::CreateParam: Clone + Default + Send + Sync,
-    Xfrm::LocalAddr: From<<Channel::Socket as Socket>::Addr>,
-    Ctx: 'static
-        + FarChannelRegistryCtx<Channel, F, SessionAuth, Xfrm>
-        + NSNameCachesCtx
-        + Send
-        + Sync,
-    Ctx::NameCaches: NSNameCachesCtx,
-    Endpoint: 'static + Send,
-    Resolver: 'static
-        + Addrs<Addr = <Channel::Xfrm as DatagramXfrm>::PeerAddr>
-        + AddrsCreate<Ctx, Vec<Endpoint>, Config = ResolverConfig>
-        + Send
-        + Sync,
-    Resolver::Origin: 'static
-        + Clone
-        + Eq
-        + Hash
-        + Into<Option<IPEndpointAddr>>
-        + Send
-        + Sync {
-    channel: PhantomData<Channel>,
-    flow: PhantomData<F>,
-    xfrm: PhantomData<Xfrm>,
-    resolver: PhantomData<Resolver>,
-    session: PhantomData<Session>,
-    config: MulticastClientConfig<
-        SessionAuth::Prin,
-        ChannelRegistryChannelsConfig<()>,
-        Epochs::Config,
-        Endpoint
-    >,
-    session_args: Session::Args,
-    session_config: Session::Config,
-    listener: ThreadedFlowsListener<
-        <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
-        StreamID<
-            <Channel::Xfrm as DatagramXfrm>::PeerAddr,
-            F::ChannelID,
-            Channel::Param
-        >,
-        SessionAuth::Prin
-    >,
-    shutdown: ShutdownFlag,
-    ctx: Ctx
+    self_party: Types::SessionPrin,
+    session_args: Types::SessionArgs,
+    session_config: Types::SessionConfig,
+    ctx: Types::Ctx
 }
 
 pub struct MulticastClientComponentCleanup<Session>
 where
     Session: ClientSessionCleanup {
     shutdown: ShutdownFlag,
-    multicast: MulticastLargeObjBusCleanup,
+    multicast: MulticastBusCleanup,
     session: Session
+}
+
+pub struct MulticastClientParam<Ctx, Args> {
+    session_args: Args,
+    ctx: Ctx
 }
 
 #[derive(Debug)]
@@ -265,261 +134,94 @@ pub enum MulticastClientComponentRunError<Session, Multicast, Start> {
     SkippedIdx
 }
 
-impl<
-        Msg,
-        Wrapper,
-        MsgAuth,
-        WrapperCodec,
-        H,
-        IDs,
-        Msgs,
-        Recv,
-        Session,
-        Epochs,
-        Channel,
-        F,
-        SessionAuth,
-        Xfrm,
-        Ctx,
-        Resolver,
-        Endpoint
-    >
-    MulticastClientComponent<
-        Msg,
-        Wrapper,
-        MsgAuth,
-        WrapperCodec,
-        H,
-        IDs,
-        Msgs,
-        Recv,
-        Session,
-        Epochs,
-        Channel,
-        F,
-        SessionAuth,
-        Xfrm,
-        Ctx,
-        Resolver,
-        Endpoint
-    >
-where
-    Recv: 'static + Clone + AuthNMsgRecv<MsgAuth::Prin, Msg> + Send,
-    Msgs: 'static + Clone + LargeObjMsgs<H, Wrapper> + Send,
-    IDs: 'static + Clone + IDGen + Iterator<Item = LargeObjID> + Send,
-    MsgAuth: 'static
-        + Clone
-        + MsgAuthN<Msg, Wrapper, SessionPrin = SessionAuth::Prin>
-        + Send,
-    MsgAuth::SessionPrin: Send + Sync,
-    Msg: 'static + Clone + Send,
-    Wrapper: 'static + Clone + Send,
-    WrapperCodec: 'static + Clone + Codec<Wrapper> + Send,
-    <WrapperCodec as Codec<Wrapper>>::Param: Default,
-    H: 'static + Clone + Default + HashAlgo + Send,
-    H::HashID: Clone + Display + Hash + Eq + Send,
-    Session: MulticastClientSession<
-        H,
-        Msg,
-        Wrapper,
-        MsgAuth,
-        WrapperCodec,
-        IDs,
-        Msgs,
-        Recv
-    >,
-    Epochs: 'static + IDGen + Iterator<Item = u128> + Send + Sync,
-    Epochs::Item: Clone + Default + Display + Ord + Send,
-    SessionAuth: 'static
-        + Clone
-        + SessionAuthN<<Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow>
-        + Send
-        + Sync,
-    SessionAuth::Prin: 'static + Clone + Display + Eq + Hash + Send + Sync,
-    Channel: 'static
-        + FarChannelOwnedFlows<F, SessionAuth, Xfrm>
-        + FarChannelCreate
-        + Send
-        + Sync,
-    Channel::Acquired: FarChannelAcquiredResolve<Resolved = Channel::Param>,
-    Channel::Param: 'static
-        + Clone
-        + Display
-        + Eq
-        + Hash
-        + PartialEq
-        + ChannelParam<<Channel::Xfrm as DatagramXfrm>::PeerAddr>
-        + Send
-        + Sync,
-    Channel::Acquired:
-        FarChannelAcquiredResolve<Resolved = Channel::Param> + Send + Sync,
-    <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow:
-        ConcurrentStream + Send,
-    <Channel::Xfrm as DatagramXfrm>::PeerAddr: Eq + Hash + Send + Sync,
-    F: 'static,
-    F: OwnedFlowsCreate<
-            Channel::Socket,
-            Channel::Nego,
-            SessionAuth,
-            Channel::Xfrm
-        > + Send,
-    F::Flow: 'static + ConcurrentStream + Send,
-    F::CreateParam: Clone + Default + Send + Sync,
-    F::Reporter: Clone + Send + Sync,
-    F::ChannelID: From<usize> + Into<usize> + Send + Sync,
-    Xfrm: 'static
-        + DatagramXfrm
-        + DatagramXfrmCreate<Addr = Channel::Param>
-        + Send
-        + Sync,
-    Xfrm::CreateParam: Clone + Default + Send + Sync,
-    Xfrm::LocalAddr: From<<Channel::Socket as Socket>::Addr>,
-    Ctx: 'static
-        + FarChannelRegistryCtx<Channel, F, SessionAuth, Xfrm>
-        + NSNameCachesCtx
-        + Send
-        + Sync,
-    Ctx::NameCaches: NSNameCachesCtx,
-    Endpoint: 'static + Send,
-    Resolver: 'static
-        + Addrs<Addr = <Channel::Xfrm as DatagramXfrm>::PeerAddr>
-        + AddrsCreate<Ctx, Vec<Endpoint>, Config = ResolverConfig>
-        + Send
-        + Sync,
-    Resolver::Origin: 'static
-        + Clone
-        + Eq
-        + Hash
-        + Into<Option<IPEndpointAddr>>
-        + Send
-        + Sync
-{
-    pub fn create(
-        config: MulticastClientConfig<
-            SessionAuth::Prin,
-            ChannelRegistryChannelsConfig<()>,
-            Epochs::Config,
-            Endpoint
-        >,
-        session_args: Session::Args,
-        session_config: Session::Config,
-        listener: ThreadedFlowsListener<
-            <Channel::Nego as OwnedFlowNegotiator<F::Flow>>::Flow,
-            StreamID<
-                <Channel::Xfrm as DatagramXfrm>::PeerAddr,
-                F::ChannelID,
-                Channel::Param
-            >,
-            SessionAuth::Prin
-        >,
-        shutdown: ShutdownFlag,
+impl<Ctx, Args> MulticastClientParam<Ctx, Args> {
+    #[inline]
+    pub fn new(
+        session_args: Args,
         ctx: Ctx
     ) -> Self {
-        MulticastClientComponent {
-            channel: PhantomData,
-            flow: PhantomData,
-            xfrm: PhantomData,
-            resolver: PhantomData,
-            session: PhantomData,
-            config: config,
+        MulticastClientParam {
             session_args: session_args,
-            session_config: session_config,
-            listener: listener,
-            shutdown: shutdown,
             ctx: ctx
         }
     }
+}
 
+impl<Types> MulticastClientComponent<Types>
+where
+    Types: MulticastClientComponentTypes {
+    pub fn create(
+        config: MulticastClientConfig<
+            Types::SessionConfig,
+            Types::ChansConfig,
+            Types::EpochsConfig,
+            Types::SessionPrin,
+            Types::MsgAuthConfig,
+            Types::Addr
+        >,
+        param: MulticastClientParam<Types::Ctx, Types::SessionArgs>
+    ) -> Self {
+        let (self_party, config, session_config) = config.take();
+        let MulticastClientParam { ctx, session_args } = param;
+
+        MulticastClientComponent {
+            config: config,
+            self_party: self_party,
+            session_args: session_args,
+            session_config: session_config,
+            ctx: ctx
+        }
+    }
+}
+
+impl<Types> MulticastClientComponent<Types>
+where
+    Types: MulticastClientComponentTypes {
     pub fn start(
         self
     ) -> Result<
-        MulticastClientComponentCleanup<Session::Cleanup>,
+        MulticastClientComponentCleanup<Types::SessionCleanup>,
         MulticastClientComponentRunError<
-            Session::CreateError,
-            MulticastLargeObjBusRunError<
-                FarChannelRegistryAcquireError<
-                    RegistryAcquireError<
-                        Channel::AcquireError,
-                        <Channel::Acquired as FarChannelAcquiredResolve>::ResolverError,
-                        FarChannelFlowsError<
-                            Channel::SocketError,
-                            F::CreateError,
-                            Channel::XfrmError
-                        >,
-                        <Channel::Acquired as FarChannelAcquired>::WrapError
-                    >
-                >,
-                Infallible,
-                StreamSelectorCreateError<
-                    FarChannelRegistryChannelsCreateError<Infallible>,
-                    Resolver::CreateError
-                >,
-                ThreadedStreamSelectorError<
-                    Resolver::AddrsError,
-                    FarChannelRegistryAcquireError<
-                        RegistryAcquireError<
-                            Channel::AcquireError,
-                            <Channel::Acquired as FarChannelAcquiredResolve>::ResolverError,
-                            FarChannelFlowsError<
-                                Channel::SocketError,
-                                F::CreateError,
-                                Channel::XfrmError
-                            >,
-                            <Channel::Acquired as FarChannelAcquired>::WrapError
-                        >
-                    >
-                >,
+            Types::SessionCreateError,
+            MulticastBusCreateError<
+                PollThreadCreateError<
+                    Types::ModeCreateError,
+                    Types::ChansCreateError,
+                    StreamSelectorCreateError<
+                        Types::ResolveCreateError,
+                        Types::EpochsCreateError
+                    >,
+                    Types::MsgAuthCreateError
+                >
             >,
-            Session::StartError
+            Types::SessionStartError,
         >
     >{
         let MulticastClientComponent {
             session_args,
             session_config,
             config,
-            listener,
             ctx,
-            shutdown,
             ..
         } = self;
 
         info!(target: "multicast-client-component",
               "starting multicast client component");
 
-        let (self_party, multicast_config) = config.take();
-        let (session, notify, proto) =
-            Session::create(session_args, session_config).map_err(|err| {
+        let multicast_config = config.take();
+        let session = Types::Session::create(session_config, session_args)
+            .map_err(|err| {
                 MulticastClientComponentRunError::Session { err: err }
             })?;
-        let multicast: MulticastLargeObjBus<
-            _,
-            _,
-            WrapperCodec,
-            H,
-            _,
-            _,
-            _,
-            _,
-            Epochs,
-            _,
-            _,
-            _,
-            _,
-            Resolver,
-            _,
-            _
-        > = MulticastLargeObjBus::create(
-            Some(self_party.clone()),
-            multicast_config,
-            listener,
-            ctx,
-            shutdown.clone(),
-            notify,
-            proto.clone()
-        )
-        .map_err(|err| {
-            MulticastClientComponentRunError::Multicast { err: err }
-        })?;
+        let multicast: MulticastBus<Types::BusTypes, Types::Ctx> =
+            MulticastBus::create(
+                multicast_config,
+                Some(self.self_party),
+                ctx,
+            )
+            .map_err(|err| {
+                MulticastClientComponentRunError::Multicast { err: err }
+            })?;
         let Ok(parties) = multicast.parties();
         let session_cleanup = session.start(parties).map_err(|err| {
             MulticastClientComponentRunError::Start { err: err }
