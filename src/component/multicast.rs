@@ -28,13 +28,13 @@ use constellation_channels::far::compound::CompoundFarChannelSessionCred;
 use constellation_channels::far::compound::CompoundFarChannelXfrmPeerAddr;
 use constellation_channels::far::compound::CompoundFarIPChannelXfrmPeerAddr;
 use constellation_channels::resolve::cache::NSNameCachesCtx;
-use constellation_common::config::CreateWithParam;
 use constellation_common::shutdown::ShutdownFlag;
 use constellation_component_common::config::MulticastLargeObjBusConfig;
 use constellation_component_common::bus::multicast::MulticastBus;
 use constellation_component_common::bus::multicast::MulticastBusCleanup;
 use constellation_component_common::bus::multicast::MulticastBusCreateError;
 use constellation_component_common::bus::multicast::MulticastBusTypes;
+use constellation_streams::large_obj::LargeObjProtoTypes;
 use constellation_streams::select::StreamSelectorCreateError;
 use constellation_streams::threads::poll::PollThreadCreateError;
 use constellation_streams::threads::poll::PollThreadTypes;
@@ -43,10 +43,11 @@ use log::info;
 
 use crate::config::MulticastClientConfig;
 use crate::session::ClientSessionCleanup;
-use crate::session::ClientSessionTypes;
 use crate::session::MulticastClientSession;
 
 pub trait MulticastClientComponentTypes {
+    type InMsg;
+    type OutMsg;
     type Addr: 'static + Clone + Debug + Display + Eq + Hash + Send;
     type Ctx: 'static + NSNameCachesCtx + Send;
     type SessionPrin: Clone + Debug + Display + Eq + Hash;
@@ -80,15 +81,18 @@ pub trait MulticastClientComponentTypes {
     > + Send;
     type SessionArgs;
     type SessionConfig;
-    type SessionTypes: ClientSessionTypes<
+    type SessionTypes: LargeObjProtoTypes<
+        Self::InMsg, Self::OutMsg,
         SessionPrin = Self::SessionPrin
     >;
     type SessionCleanup: ClientSessionCleanup;
     type SessionCreateError: Debug + Display;
     type SessionStartError: Debug + Display;
     type Session: MulticastClientSession<
+        Self::SessionTypes,
+        Self::InMsg,
+        Self::OutMsg,
         Self::SessionArgs,
-        Self::SessionPrin,
         Cleanup = Self::SessionCleanup,
         StartError = Self::SessionStartError,
         Config = Self::SessionConfig,
@@ -209,7 +213,8 @@ where
               "starting multicast client component");
 
         let multicast_config = config.take();
-        let session = Types::Session::create(session_config, session_args)
+        let (session, recv, msgs) =
+            Types::Session::create(session_config, session_args)
             .map_err(|err| {
                 MulticastClientComponentRunError::Session { err: err }
             })?;
@@ -218,6 +223,8 @@ where
                 multicast_config,
                 Some(self.self_party),
                 ctx,
+                recv,
+                msgs
             )
             .map_err(|err| {
                 MulticastClientComponentRunError::Multicast { err: err }

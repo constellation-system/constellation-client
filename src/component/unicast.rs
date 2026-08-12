@@ -24,6 +24,8 @@ use std::hash::Hash;
 use std::io::Error;
 use std::net::SocketAddr;
 
+use constellation_auth::authn::AuthNed;
+use constellation_auth::authn::AuthNMsgRecv;
 use constellation_auth::cred::SSLCred;
 use constellation_channels::far::compound::CompoundFarChannelSessionCred;
 use constellation_channels::far::compound::CompoundFarChannelXfrmPeerAddr;
@@ -36,6 +38,8 @@ use constellation_component_common::bus::unicast::UnicastBus;
 use constellation_component_common::bus::unicast::UnicastBusCleanup;
 use constellation_component_common::bus::unicast::UnicastBusCreateError;
 use constellation_component_common::bus::unicast::UnicastBusTypes;
+use constellation_streams::config::PrivateLargeObjModeConfig;
+use constellation_streams::large_obj::LargeObjProtoTypes;
 use constellation_streams::select::StreamSelectorCreateError;
 use constellation_streams::threads::poll::PollThreadCreateError;
 use constellation_streams::threads::poll::PollThreadTypes;
@@ -44,21 +48,37 @@ use log::info;
 
 use crate::config::UnicastClientConfig;
 use crate::session::ClientSessionCleanup;
-use crate::session::ClientSessionTypes;
 use crate::session::UnicastClientSession;
 
 pub trait UnicastClientComponentTypes {
+    type InMsg;
+    type OutMsg;
+    type AuthNMsg: AuthNed<Self::MsgPrin, Self::InMsg>;
     type Addr: 'static + Clone + Debug + Display + Eq + Hash + Send;
     type Ctx: 'static + NSNameCachesCtx + Send;
+    type MsgPrin: Clone + Display + Eq + Hash;
     type SessionPrin: Clone + Debug + Display + Eq + Hash;
     type ChansConfig: Default;
     type ChansCreateError: Debug + Display;
+    type Msgs: 'static + Send;
+    type Recv: 'static
+        + AuthNMsgRecv<
+            Self::MsgPrin,
+            Self::InMsg,
+            Self::AuthNMsg,
+        >
+        + Send;
     type MsgAuthConfig;
     type MsgAuthCreateError: Debug + Display;
     type ThreadTypes: PollThreadTypes<
         Self::Ctx,
         Addr = Self::Addr,
+        InMsg = Self::InMsg,
+        AuthNMsg = Self::AuthNMsg,
+        MsgPrin = Self::MsgPrin,
         SessionPrin = Self::SessionPrin,
+        Msgs = Self::Msgs,
+        Recv = Self::Recv,
         ChansConfig = Self::ChansConfig,
         ChansCreateError = Self::ChansCreateError,
         MsgAuthConfig = Self::MsgAuthConfig,
@@ -70,25 +90,41 @@ pub trait UnicastClientComponentTypes {
     type ResolveCreateError: Debug + Display;
     type BusTypes: UnicastBusTypes<
         Self::Ctx,
+        Addr = Self::Addr,
+        InMsg = Self::InMsg,
+        MsgPrin = Self::MsgPrin,
+        AuthNMsg = Self::AuthNMsg,
+        Msgs = Self::Msgs,
+        Recv = Self::Recv,
         ThreadTypes = Self::ThreadTypes,
         EpochsConfig = Self::EpochsConfig,
         EpochsCreateError = Self::EpochsCreateError,
         ResolveCreateError = Self::ResolveCreateError,
+        ModeConfig = PrivateLargeObjModeConfig,
         ModeCreateError = Self::ModeCreateError,
+        ChansConfig = Self::ChansConfig,
         ChansCreateError = Self::ChansCreateError,
+        MsgAuthConfig = Self::MsgAuthConfig,
         MsgAuthCreateError = Self::MsgAuthCreateError
     > + Send;
     type SessionArgs;
     type SessionConfig;
-    type SessionTypes: ClientSessionTypes<
+    type SessionTypes: LargeObjProtoTypes<
+        Self::InMsg, Self::OutMsg,
+        Msgs = Self::Msgs,
+        Recv = Self::Recv,
+        AuthNMsg = Self::AuthNMsg,
+        Prin = Self::MsgPrin,
         SessionPrin = Self::SessionPrin
     >;
     type SessionCleanup: ClientSessionCleanup;
     type SessionCreateError: Debug + Display;
     type SessionStartError: Debug + Display;
     type Session: UnicastClientSession<
+        Self::SessionTypes,
+        Self::InMsg,
+        Self::OutMsg,
         Self::SessionArgs,
-        Self::SessionPrin,
         Cleanup = Self::SessionCleanup,
         StartError = Self::SessionStartError,
         Config = Self::SessionConfig,
@@ -213,15 +249,17 @@ where
         info!(target: "unicast-client-component",
               "starting unicast client component");
 
-        let unicast_config = config.take();
-        let session = Types::Session::create(session_config, session_args)
+        let (session, recv, msgs) =
+            Types::Session::create(session_config, session_args)
             .map_err(|err| {
                 UnicastClientComponentRunError::Session { err: err }
             })?;
         let unicast: UnicastBus<Types::BusTypes, Types::Ctx> =
             UnicastBus::create(
-                unicast_config,
+                config,
                 ctx,
+                recv,
+                msgs
             )
             .map_err(|err| UnicastClientComponentRunError::Unicast {
                 err: err

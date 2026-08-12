@@ -18,55 +18,45 @@
 
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::hash::Hash;
 
-use constellation_auth::authn::AuthNMsgRecv;
-use constellation_auth::authn::MsgAuthN;
-use constellation_common::config::CreateWithParam;
-use constellation_common::hashid::HashAlgo;
-use constellation_common::hashid::HashID;
-use constellation_common::sync::Notify;
 use constellation_component_common::PartyStreamIdx;
-use constellation_streams::frags::OutboundFrags;
-use constellation_streams::large_obj::LargeObjID;
-use constellation_streams::large_obj::LargeObjMsgs;
-use constellation_streams::large_obj::LargeObjProto;
 use constellation_streams::large_obj::LargeObjProtoTypes;
-use constellation_streams::multicast::StreamMulticasterFrags;
 
-pub trait ClientSessionTypes {
-    type InMsg;
-    type OutMsg;
-    type SessionPrin: Clone + Debug + Display + Eq + Hash;
-    type ProtoTypes: LargeObjProtoTypes<
-        Self::InMsg,
-        Self::OutMsg,
-        SessionPrin = Self::SessionPrin
-    >;
-}
-
-pub trait MulticastClientSession<Args, Prin>: CreateWithParam<Args> + Sized {
-    type StartError: Display;
+pub trait MulticastClientSession<Types, InMsg, OutMsg, Args>: Sized
+where Types: LargeObjProtoTypes<InMsg, OutMsg>
+{
+    type Config;
+    type CreateError: Debug + Display;
+    type StartError: Debug + Display;
     type Cleanup: ClientSessionCleanup;
+
+    fn create(
+        config: Self::Config,
+        args: Args
+    ) -> Result<(Self, Types::Recv, Types::Msgs), Self::CreateError>;
 
     fn start<I>(
         self,
         parties: I
     ) -> Result<Self::Cleanup, Self::StartError>
     where
-        I: Iterator<Item = (PartyStreamIdx, Prin)>;
+        I: Iterator<Item = (PartyStreamIdx, Types::Prin)>;
 }
 
-pub trait UnicastClientSession<Args, Prin>: CreateWithParam<Args> + Sized {
+pub trait UnicastClientSession<Types, InMsg, OutMsg, Args>: Sized
+where Types: LargeObjProtoTypes<InMsg, OutMsg>
+{
+    type Config;
+    type CreateError: Debug + Display;
     type StartError: Display;
     type Cleanup: ClientSessionCleanup;
 
-    fn start<I>(
-        self,
-        parties: I
-    ) -> Result<Self::Cleanup, Self::StartError>
-    where
-        I: Iterator<Item = (PartyStreamIdx, Prin)>;
+    fn create(
+        config: Self::Config,
+        args: Args
+    ) -> Result<(Self, Types::Recv, Types::Msgs), Self::CreateError>;
+
+    fn start(self) -> Result<Self::Cleanup, Self::StartError>;
 }
 
 pub trait ClientSessionCleanup {
