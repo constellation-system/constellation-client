@@ -23,6 +23,8 @@ use std::hash::Hash;
 use std::io::Error;
 use std::net::SocketAddr;
 
+use constellation_auth::authn::AuthNed;
+use constellation_auth::authn::AuthNMsgRecv;
 use constellation_auth::cred::SSLCred;
 use constellation_channels::far::compound::CompoundFarChannelSessionCred;
 use constellation_channels::far::compound::CompoundFarChannelXfrmPeerAddr;
@@ -34,6 +36,7 @@ use constellation_component_common::bus::multicast::MulticastBus;
 use constellation_component_common::bus::multicast::MulticastBusCleanup;
 use constellation_component_common::bus::multicast::MulticastBusCreateError;
 use constellation_component_common::bus::multicast::MulticastBusTypes;
+use constellation_streams::config::SharedLargeObjModeConfig;
 use constellation_streams::large_obj::LargeObjProtoTypes;
 use constellation_streams::select::StreamSelectorCreateError;
 use constellation_streams::threads::poll::PollThreadCreateError;
@@ -48,17 +51,29 @@ use crate::session::MulticastClientSession;
 pub trait MulticastClientComponentTypes {
     type InMsg;
     type OutMsg;
+    type AuthNMsg: AuthNed<Self::MsgPrin, Self::InMsg>;
     type Addr: 'static + Clone + Debug + Display + Eq + Hash + Send;
     type Ctx: 'static + NSNameCachesCtx + Send;
+    type MsgPrin: Clone + Display + Eq + Hash;
     type SessionPrin: Clone + Debug + Display + Eq + Hash;
     type ChansConfig: Default;
     type ChansCreateError: Debug + Display;
+    type Msgs: 'static + Send;
+    type Recv: 'static
+        + AuthNMsgRecv<
+            Self::MsgPrin,
+            Self::InMsg,
+            Self::AuthNMsg,
+        >
+        + Send;
     type MsgAuthConfig;
     type MsgAuthCreateError: Debug + Display;
     type ThreadTypes: PollThreadTypes<
         Self::Ctx,
         Addr = Self::Addr,
         SessionPrin = Self::SessionPrin,
+        Msgs = Self::Msgs,
+        Recv = Self::Recv,
         ChansConfig = Self::ChansConfig,
         ChansCreateError = Self::ChansCreateError,
         MsgAuthConfig = Self::MsgAuthConfig,
@@ -70,20 +85,28 @@ pub trait MulticastClientComponentTypes {
     type ResolveCreateError: Debug + Display;
     type BusTypes: MulticastBusTypes<
         Self::Ctx,
+        Addr = Self::Addr,
         SessionPrin = Self::SessionPrin,
+        Msgs = Self::Msgs,
+        Recv = Self::Recv,
         ThreadTypes = Self::ThreadTypes,
         EpochsConfig = Self::EpochsConfig,
         EpochsCreateError = Self::EpochsCreateError,
         ResolveCreateError = Self::ResolveCreateError,
+        ModeConfig = SharedLargeObjModeConfig,
         ModeCreateError = Self::ModeCreateError,
+        ChansConfig = Self::ChansConfig,
         ChansCreateError = Self::ChansCreateError,
+        MsgAuthConfig = Self::MsgAuthConfig,
         MsgAuthCreateError = Self::MsgAuthCreateError
     > + Send;
     type SessionArgs;
     type SessionConfig;
     type SessionTypes: LargeObjProtoTypes<
         Self::InMsg, Self::OutMsg,
-        SessionPrin = Self::SessionPrin
+        SessionPrin = Self::SessionPrin,
+        Msgs = Self::Msgs,
+        Recv = Self::Recv,
     >;
     type SessionCleanup: ClientSessionCleanup;
     type SessionCreateError: Debug + Display;
@@ -212,7 +235,6 @@ where
         info!(target: "multicast-client-component",
               "starting multicast client component");
 
-        let multicast_config = config.take();
         let (session, recv, msgs) =
             Types::Session::create(session_config, session_args)
             .map_err(|err| {
@@ -220,7 +242,7 @@ where
             })?;
         let multicast: MulticastBus<Types::BusTypes, Types::Ctx> =
             MulticastBus::create(
-                multicast_config,
+                config,
                 Some(self.self_party),
                 ctx,
                 recv,
@@ -290,7 +312,7 @@ where
         }
     }
 }
-
+/*
 // ISSUE #2: Delete from here
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -358,3 +380,4 @@ impl Display for TestCred {
 }
 
 // ISSUE #2: to here
+*/

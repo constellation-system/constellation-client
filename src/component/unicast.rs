@@ -322,7 +322,7 @@ where
         }
     }
 }
-
+/*
 // ISSUE #2: Delete from here
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -390,3 +390,4 @@ impl Display for TestCred {
 }
 
 // ISSUE #2: to here
+*/
