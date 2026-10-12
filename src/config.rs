@@ -18,49 +18,171 @@
 
 use constellation_component_common::config::MulticastLargeObjBusConfig;
 use constellation_component_common::config::UnicastLargeObjBusConfig;
+use constellation_component_common::config::XactBatchCodecConfig;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename = "multicast-client")]
 #[serde(rename_all = "kebab-case")]
-pub struct MulticastClientConfig<Session, Channels, Epochs,
-                                 PartyID, AuthN, Endpoint>
-where
-    Channels: Default,
-    Epochs: Default {
-    /// Party identitfying this node.
-    #[serde(rename = "self")]
-    self_party: PartyID,
+pub struct MulticastClientConfig<
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+> where
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default {
     #[serde(flatten)]
-    multicast: MulticastLargeObjBusConfig<Channels, Epochs, PartyID,
-                                          AuthN, Endpoint>,
+    multicast: MulticastLargeObjBusConfig<
+        String,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >,
     #[serde(flatten)]
     session: Session
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename = "unicast-client")]
 #[serde(rename_all = "kebab-case")]
-pub struct UnicastClientConfig<Session, Channels, Epochs, AuthN, Endpoint>
-where
-    Channels: Default,
-    Epochs: Default {
+pub struct UnicastClientConfig<
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+> where
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default {
     #[serde(flatten)]
-    unicast: UnicastLargeObjBusConfig<Channels, Epochs, AuthN, Endpoint>,
+    unicast: UnicastLargeObjBusConfig<
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >,
     #[serde(flatten)]
     session: Session
 }
 
-impl<Session, Channels, Epochs, AuthN, Endpoint>
-    UnicastClientConfig<Session, Channels, Epochs, AuthN, Endpoint>
+impl<
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+>
+    UnicastClientConfig<
+        Session,
+        Seal,
+        Payload,
+        Effect,
+        Res,
+        Err,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >
 where
-    Channels: Default,
-    Epochs: Default
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default
 {
     #[inline]
     pub fn new(
-        unicast: UnicastLargeObjBusConfig<Channels, Epochs, AuthN, Endpoint>,
+        unicast: UnicastLargeObjBusConfig<
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            IDs,
+            Resolver,
+            Epochs,
+            MsgAuthN
+        >,
         session: Session
     ) -> Self {
         UnicastClientConfig {
@@ -72,10 +194,21 @@ where
     #[inline]
     pub fn unicast(
         &self
-    ) -> &UnicastLargeObjBusConfig<Channels, Epochs, AuthN, Endpoint> {
+    ) -> &UnicastLargeObjBusConfig<
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    > {
         &self.unicast
     }
-
 
     #[inline]
     pub fn session(&self) -> &Session {
@@ -85,42 +218,114 @@ where
     #[inline]
     pub fn take(
         self
-    ) -> (UnicastLargeObjBusConfig<Channels, Epochs, AuthN, Endpoint>,
-          Session) {
+    ) -> (
+        UnicastLargeObjBusConfig<
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            IDs,
+            Resolver,
+            Epochs,
+            MsgAuthN
+        >,
+        Session
+    ) {
         (self.unicast, self.session)
     }
 }
 
-impl<Session, Channels, Epochs, PartyID, AuthN, Endpoint>
-    MulticastClientConfig<Session, Channels, Epochs, PartyID, AuthN, Endpoint>
+impl<
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+>
+    MulticastClientConfig<
+        Session,
+        Seal,
+        Payload,
+        Effect,
+        Res,
+        Err,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >
 where
-    Channels: Default,
-    Epochs: Default
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default
 {
     #[inline]
     pub fn new(
-        self_party: PartyID,
-        multicast: MulticastLargeObjBusConfig<Channels, Epochs, PartyID,
-                                              AuthN, Endpoint>,
+        multicast: MulticastLargeObjBusConfig<
+            String,
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            IDs,
+            Resolver,
+            Epochs,
+            MsgAuthN
+        >,
         session: Session
     ) -> Self {
         MulticastClientConfig {
-            self_party: self_party,
             multicast: multicast,
             session: session
         }
     }
 
     #[inline]
-    pub fn self_party(&self) -> &PartyID {
-        &self.self_party
-    }
-
-    #[inline]
     pub fn multicast(
         &self
-    ) -> &MulticastLargeObjBusConfig<Channels, Epochs, PartyID,
-                                     AuthN, Endpoint> {
+    ) -> &MulticastLargeObjBusConfig<
+        String,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    > {
         &self.multicast
     }
 
@@ -128,11 +333,22 @@ where
     pub fn take(
         self
     ) -> (
-        PartyID,
-        MulticastLargeObjBusConfig<Channels, Epochs, PartyID,
-                                   AuthN, Endpoint>,
+        MulticastLargeObjBusConfig<
+            String,
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            IDs,
+            Resolver,
+            Epochs,
+            MsgAuthN
+        >,
         Session
     ) {
-        (self.self_party, self.multicast, self.session)
+        (self.multicast, self.session)
     }
 }

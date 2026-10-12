@@ -19,12 +19,9 @@
 use std::fmt::Debug;
 use std::fmt::Display;
 
-use constellation_component_common::PartyStreamIdx;
-use constellation_streams::large_obj::LargeObjProtoTypes;
+use constellation_streams::multicast::MulticastStreamIdx;
 
-pub trait MulticastClientSession<Types, InMsg, OutMsg, Args>: Sized
-where Types: LargeObjProtoTypes<InMsg, OutMsg>
-{
+pub trait MulticastClientSession<Prin, Recv, Msgs, Args>: Sized {
     type Config;
     type CreateError: Debug + Display;
     type StartError: Debug + Display;
@@ -33,19 +30,17 @@ where Types: LargeObjProtoTypes<InMsg, OutMsg>
     fn create(
         config: Self::Config,
         args: Args
-    ) -> Result<(Self, Types::Recv, Types::Msgs), Self::CreateError>;
+    ) -> Result<(Self, Recv, Msgs), Self::CreateError>;
 
     fn start<I>(
         self,
         parties: I
     ) -> Result<Self::Cleanup, Self::StartError>
     where
-        I: Iterator<Item = (PartyStreamIdx, Types::Prin)>;
+        I: Iterator<Item = (MulticastStreamIdx, Prin)>;
 }
 
-pub trait UnicastClientSession<Types, InMsg, OutMsg, Args>: Sized
-where Types: LargeObjProtoTypes<InMsg, OutMsg>
-{
+pub trait UnicastClientSession<Recv, Msgs, Args>: Sized {
     type Config;
     type CreateError: Debug + Display;
     type StartError: Display;
@@ -54,7 +49,7 @@ where Types: LargeObjProtoTypes<InMsg, OutMsg>
     fn create(
         config: Self::Config,
         args: Args
-    ) -> Result<(Self, Types::Recv, Types::Msgs), Self::CreateError>;
+    ) -> Result<(Self, Recv, Msgs), Self::CreateError>;
 
     fn start(self) -> Result<Self::Cleanup, Self::StartError>;
 }

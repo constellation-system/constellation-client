@@ -16,32 +16,32 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
+use std::convert::Infallible;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
 use std::io::Error;
-use std::net::SocketAddr;
 
-use constellation_auth::authn::AuthNed;
 use constellation_auth::authn::AuthNMsgRecv;
-use constellation_auth::cred::SSLCred;
-use constellation_channels::far::compound::CompoundFarChannelSessionCred;
-use constellation_channels::far::compound::CompoundFarChannelXfrmPeerAddr;
-use constellation_channels::far::compound::CompoundFarIPChannelXfrmPeerAddr;
+use constellation_auth::authn::AuthNed;
 use constellation_channels::resolve::cache::NSNameCachesCtx;
-use constellation_common::shutdown::ShutdownFlag;
+use constellation_common::config::Create;
+use constellation_common::config::CreateWithParam;
+use constellation_common::error::MutexPoison;
+use constellation_common::hashid::HashAlgo;
+use constellation_common::hashid::HashID;
+use constellation_component_common::bus::multicast::MulticastLargeObjBus;
+use constellation_component_common::bus::multicast::MulticastLargeObjBusCreateError;
+use constellation_component_common::bus::types::MulticastLargeObjBusTypes;
 use constellation_component_common::config::MulticastLargeObjBusConfig;
-use constellation_component_common::bus::multicast::MulticastBus;
-use constellation_component_common::bus::multicast::MulticastBusCleanup;
-use constellation_component_common::bus::multicast::MulticastBusCreateError;
-use constellation_component_common::bus::multicast::MulticastBusTypes;
-use constellation_streams::config::SharedLargeObjModeConfig;
-use constellation_streams::large_obj::LargeObjProtoTypes;
-use constellation_streams::select::StreamSelectorCreateError;
-use constellation_streams::threads::poll::PollThreadCreateError;
-use constellation_streams::threads::poll::PollThreadTypes;
-use log::debug;
+use constellation_component_common::config::XactBatchCodecConfig;
+use constellation_component_common::xact::XactBatchCodecCreateError;
+use constellation_component_common::xact::XactCommittedRoundCodecCreateError;
+use constellation_component_common::xact::XactNotifyCodecCreateError;
+use constellation_component_common::xact::XactReqCodecCreateError;
+use constellation_component_common::xact::XactSealedCodecCreateError;
+use constellation_streams::large_obj::LargeObjProtoCreateError;
 use log::info;
 
 use crate::config::MulticastClientConfig;
@@ -49,102 +49,171 @@ use crate::session::ClientSessionCleanup;
 use crate::session::MulticastClientSession;
 
 pub trait MulticastClientComponentTypes {
-    type InMsg;
-    type OutMsg;
-    type AuthNMsg: AuthNed<Self::MsgPrin, Self::InMsg>;
-    type Addr: 'static + Clone + Debug + Display + Eq + Hash + Send;
-    type Ctx: 'static + NSNameCachesCtx + Send;
-    type MsgPrin: Clone + Display + Eq + Hash;
-    type SessionPrin: Clone + Debug + Display + Eq + Hash;
-    type ChansConfig: Default;
-    type ChansCreateError: Debug + Display;
-    type Msgs: 'static + Send;
-    type Recv: 'static
-        + AuthNMsgRecv<
-            Self::MsgPrin,
-            Self::InMsg,
-            Self::AuthNMsg,
-        >
-        + Send;
-    type MsgAuthConfig;
-    type MsgAuthCreateError: Debug + Display;
-    type ThreadTypes: PollThreadTypes<
-        Self::Ctx,
-        Addr = Self::Addr,
-        SessionPrin = Self::SessionPrin,
-        Msgs = Self::Msgs,
-        Recv = Self::Recv,
-        ChansConfig = Self::ChansConfig,
-        ChansCreateError = Self::ChansCreateError,
-        MsgAuthConfig = Self::MsgAuthConfig,
-        MsgAuthCreateError = Self::MsgAuthCreateError
-    >;
+    type RoundID: Clone + From<u128> + Into<u128>;
+    type Seal;
+    type SealCodecConfig: Default;
+    type SealCodecCreateError: Debug + Display;
+    type Payload;
+    type PayloadCodecConfig: Default;
+    type PayloadCodecCreateError: Debug + Display;
+    type Effect;
+    type EffectCodecConfig: Default;
+    type EffectCodecCreateError: Debug + Display;
+    type Result;
+    type ResultCodecConfig: Default;
+    type ResultCodecCreateError: Debug + Display;
+    type Error;
+    type ErrorCodecConfig: Default;
+    type ErrorCodecCreateError: Debug + Display;
+    type HashID: Clone + Display + Eq + Hash + HashID;
+    type Hash: Default
+        + HashAlgo<HashID = Self::HashID>
+        + Create<Config = Self::HashConfig, CreateError = Self::HashCreateError>;
+    type HashConfig: Default;
+    type HashCreateError: Debug + Display;
+    type IDsConfig: Default;
+    type IDsCreateError: Debug + Display;
+    type ResolverConfig: Default;
     type EpochsConfig: Default;
-    type EpochsCreateError: Debug + Display;
-    type ModeCreateError: Debug + Display;
-    type ResolveCreateError: Debug + Display;
-    type BusTypes: MulticastBusTypes<
-        Self::Ctx,
-        Addr = Self::Addr,
-        SessionPrin = Self::SessionPrin,
-        Msgs = Self::Msgs,
-        Recv = Self::Recv,
-        ThreadTypes = Self::ThreadTypes,
-        EpochsConfig = Self::EpochsConfig,
-        EpochsCreateError = Self::EpochsCreateError,
-        ResolveCreateError = Self::ResolveCreateError,
-        ModeConfig = SharedLargeObjModeConfig,
-        ModeCreateError = Self::ModeCreateError,
-        ChansConfig = Self::ChansConfig,
-        ChansCreateError = Self::ChansCreateError,
-        MsgAuthConfig = Self::MsgAuthConfig,
-        MsgAuthCreateError = Self::MsgAuthCreateError
-    > + Send;
+    type SessionAuthConfig;
+    type MsgAuthConfig;
+    type LargeObjMsgAuthConfig;
+    type UnixConfig: Default;
+    type UDPConfig: Default;
+    type MsgAuthCreateError: Debug + Display;
+    type AuthNMsg: AuthNed<Self::MsgPrin>;
+    type MsgPrin: Clone + Display + Eq + Hash;
+    type Msgs: 'static + Send;
+    type Recv: 'static + AuthNMsgRecv<Self::MsgPrin, Self::AuthNMsg> + Send;
+    type Ctx: 'static + NSNameCachesCtx + Send;
     type SessionArgs;
     type SessionConfig;
-    type SessionTypes: LargeObjProtoTypes<
-        Self::InMsg, Self::OutMsg,
-        SessionPrin = Self::SessionPrin,
-        Msgs = Self::Msgs,
-        Recv = Self::Recv,
-    >;
     type SessionCleanup: ClientSessionCleanup;
     type SessionCreateError: Debug + Display;
     type SessionStartError: Debug + Display;
     type Session: MulticastClientSession<
-        Self::SessionTypes,
-        Self::InMsg,
-        Self::OutMsg,
-        Self::SessionArgs,
-        Cleanup = Self::SessionCleanup,
-        StartError = Self::SessionStartError,
-        Config = Self::SessionConfig,
-        CreateError = Self::SessionCreateError
-    >;
+            String,
+            Self::Recv,
+            Self::Msgs,
+            Self::SessionArgs,
+            Cleanup = Self::SessionCleanup,
+            Config = Self::SessionConfig,
+            CreateError = Self::SessionCreateError,
+            StartError = Self::SessionStartError
+        >;
+    type BusTypes: MulticastLargeObjBusTypes<
+            Self::Ctx,
+            SessionPrin = String,
+            Msgs = Self::Msgs,
+            Recv = Self::Recv,
+            EpochsConfig = Self::EpochsConfig,
+            UnixConfig = Self::UnixConfig,
+            UDPConfig = Self::UDPConfig,
+            HashConfig = Self::HashConfig,
+            HashCreateError = Self::HashCreateError,
+            ResolverConfig = Self::ResolverConfig,
+            SessionAuthConfig = Self::SessionAuthConfig,
+            LargeObjMsgAuthConfig = Self::LargeObjMsgAuthConfig,
+            MsgAuthConfig = Self::MsgAuthConfig,
+            MsgAuthCreateError = Self::MsgAuthCreateError,
+            DecoderConfig = XactBatchCodecConfig<
+                Self::SealCodecConfig,
+                Self::PayloadCodecConfig,
+                Self::EffectCodecConfig,
+                Self::ResultCodecConfig,
+                Self::ErrorCodecConfig
+            >,
+            DecoderCreateError = XactBatchCodecCreateError<
+                XactSealedCodecCreateError<
+                    Self::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        Self::PayloadCodecCreateError,
+                        Self::EffectCodecCreateError
+                    >
+                >,
+                XactCommittedRoundCodecCreateError<
+                    Self::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        Self::PayloadCodecCreateError,
+                        Self::EffectCodecCreateError
+                    >
+                >,
+                XactNotifyCodecCreateError<
+                    Self::ResultCodecCreateError,
+                    Self::ErrorCodecCreateError
+                >
+            >,
+            EncoderConfig = XactBatchCodecConfig<
+                Self::SealCodecConfig,
+                Self::PayloadCodecConfig,
+                Self::EffectCodecConfig,
+                Self::ResultCodecConfig,
+                Self::ErrorCodecConfig
+            >,
+            EncoderCreateError = XactBatchCodecCreateError<
+                XactSealedCodecCreateError<
+                    Self::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        Self::PayloadCodecCreateError,
+                        Self::EffectCodecCreateError
+                    >
+                >,
+                XactCommittedRoundCodecCreateError<
+                    Self::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        Self::PayloadCodecCreateError,
+                        Self::EffectCodecCreateError
+                    >
+                >,
+                XactNotifyCodecCreateError<
+                    Self::ResultCodecCreateError,
+                    Self::ErrorCodecCreateError
+                >
+            >,
+            IDsConfig = Self::IDsConfig,
+            IDsCreateError = Self::IDsCreateError
+        > + Send;
 }
 
 pub struct MulticastClientComponent<Types>
 where
     Types: MulticastClientComponentTypes {
     config: MulticastLargeObjBusConfig<
-        Types::ChansConfig,
+        String,
+        Types::HashConfig,
+        Types::SessionAuthConfig,
+        Types::LargeObjMsgAuthConfig,
+        Types::UnixConfig,
+        Types::UDPConfig,
+        XactBatchCodecConfig<
+            Types::SealCodecConfig,
+            Types::PayloadCodecConfig,
+            Types::EffectCodecConfig,
+            Types::ResultCodecConfig,
+            Types::ErrorCodecConfig
+        >,
+        XactBatchCodecConfig<
+            Types::SealCodecConfig,
+            Types::PayloadCodecConfig,
+            Types::EffectCodecConfig,
+            Types::ResultCodecConfig,
+            Types::ErrorCodecConfig
+        >,
+        Types::IDsConfig,
+        Types::ResolverConfig,
         Types::EpochsConfig,
-        Types::SessionPrin,
-        Types::MsgAuthConfig,
-        Types::Addr
+        Types::MsgAuthConfig
     >,
-    self_party: Types::SessionPrin,
     session_args: Types::SessionArgs,
     session_config: Types::SessionConfig,
     ctx: Types::Ctx
 }
 
-pub struct MulticastClientComponentCleanup<Session>
+pub struct MulticastClientComponentCleanup<Types>
 where
-    Session: ClientSessionCleanup {
-    shutdown: ShutdownFlag,
-    multicast: MulticastBusCleanup,
-    session: Session
+    Types: MulticastClientComponentTypes {
+    multicast: MulticastLargeObjBus<Types::BusTypes, Types::Ctx>,
+    session: Types::SessionCleanup
 }
 
 pub struct MulticastClientParam<Ctx, Args> {
@@ -174,56 +243,124 @@ impl<Ctx, Args> MulticastClientParam<Ctx, Args> {
     }
 }
 
-impl<Types> MulticastClientComponent<Types>
+impl<Types>
+    CreateWithParam<MulticastClientParam<Types::Ctx, Types::SessionArgs>>
+    for MulticastClientComponent<Types>
 where
-    Types: MulticastClientComponentTypes {
-    pub fn create(
+    Types: MulticastClientComponentTypes
+{
+    type Config = MulticastClientConfig<
+        Types::SessionConfig,
+        Types::SealCodecConfig,
+        Types::PayloadCodecConfig,
+        Types::EffectCodecConfig,
+        Types::ResultCodecConfig,
+        Types::ErrorCodecConfig,
+        Types::HashConfig,
+        Types::SessionAuthConfig,
+        Types::LargeObjMsgAuthConfig,
+        Types::UnixConfig,
+        Types::UDPConfig,
+        Types::IDsConfig,
+        Types::ResolverConfig,
+        Types::EpochsConfig,
+        Types::MsgAuthConfig
+    >;
+    type CreateError = Infallible;
+
+    fn create(
         config: MulticastClientConfig<
             Types::SessionConfig,
-            Types::ChansConfig,
+            Types::SealCodecConfig,
+            Types::PayloadCodecConfig,
+            Types::EffectCodecConfig,
+            Types::ResultCodecConfig,
+            Types::ErrorCodecConfig,
+            Types::HashConfig,
+            Types::SessionAuthConfig,
+            Types::LargeObjMsgAuthConfig,
+            Types::UnixConfig,
+            Types::UDPConfig,
+            Types::IDsConfig,
+            Types::ResolverConfig,
             Types::EpochsConfig,
-            Types::SessionPrin,
-            Types::MsgAuthConfig,
-            Types::Addr
+            Types::MsgAuthConfig
         >,
         param: MulticastClientParam<Types::Ctx, Types::SessionArgs>
-    ) -> Self {
-        let (self_party, config, session_config) = config.take();
+    ) -> Result<Self, Self::CreateError> {
+        let (config, session_config) = config.take();
         let MulticastClientParam { ctx, session_args } = param;
 
-        MulticastClientComponent {
+        Ok(MulticastClientComponent {
             config: config,
-            self_party: self_party,
             session_args: session_args,
             session_config: session_config,
             ctx: ctx
-        }
+        })
     }
 }
 
 impl<Types> MulticastClientComponent<Types>
 where
-    Types: MulticastClientComponentTypes {
+    Types: 'static + MulticastClientComponentTypes
+{
     pub fn start(
         self
     ) -> Result<
-        MulticastClientComponentCleanup<Types::SessionCleanup>,
+        MulticastClientComponentCleanup<Types>,
         MulticastClientComponentRunError<
             Types::SessionCreateError,
-            MulticastBusCreateError<
-                PollThreadCreateError<
-                    Types::ModeCreateError,
-                    Types::ChansCreateError,
-                    StreamSelectorCreateError<
-                        Types::ResolveCreateError,
-                        Types::EpochsCreateError
+            MulticastLargeObjBusCreateError<
+                Types::HashCreateError,
+                Types::MsgAuthCreateError,
+                LargeObjProtoCreateError<
+                    XactBatchCodecCreateError<
+                        XactSealedCodecCreateError<
+                            Types::SealCodecCreateError,
+                            XactReqCodecCreateError<
+                                Types::PayloadCodecCreateError,
+                                Types::EffectCodecCreateError
+                            >
+                        >,
+                        XactCommittedRoundCodecCreateError<
+                            Types::SealCodecCreateError,
+                            XactReqCodecCreateError<
+                                Types::PayloadCodecCreateError,
+                                Types::EffectCodecCreateError
+                            >
+                        >,
+                        XactNotifyCodecCreateError<
+                            Types::ResultCodecCreateError,
+                            Types::ErrorCodecCreateError
+                        >
                     >,
-                    Types::MsgAuthCreateError
-                >
+                    XactBatchCodecCreateError<
+                        XactSealedCodecCreateError<
+                            Types::SealCodecCreateError,
+                            XactReqCodecCreateError<
+                                Types::PayloadCodecCreateError,
+                                Types::EffectCodecCreateError
+                            >
+                        >,
+                        XactCommittedRoundCodecCreateError<
+                            Types::SealCodecCreateError,
+                            XactReqCodecCreateError<
+                                Types::PayloadCodecCreateError,
+                                Types::EffectCodecCreateError
+                            >
+                        >,
+                        XactNotifyCodecCreateError<
+                            Types::ResultCodecCreateError,
+                            Types::ErrorCodecCreateError
+                        >
+                    >,
+                    Types::IDsCreateError
+                >,
+                MutexPoison
             >,
-            Types::SessionStartError,
+            Types::SessionStartError
         >
-    >{
+    > {
         let MulticastClientComponent {
             session_args,
             session_config,
@@ -236,53 +373,32 @@ where
               "starting multicast client component");
 
         let (session, recv, msgs) =
-            Types::Session::create(session_config, session_args)
-            .map_err(|err| {
-                MulticastClientComponentRunError::Session { err: err }
+            Types::Session::create(session_config, session_args).map_err(
+                |err| MulticastClientComponentRunError::Session { err: err }
+            )?;
+        let (multicast, parties) =
+            MulticastLargeObjBus::start(config, ctx, recv, msgs).map_err(
+                |err| MulticastClientComponentRunError::Multicast { err: err }
+            )?;
+        let session_cleanup =
+            session.start(parties.into_iter()).map_err(|err| {
+                MulticastClientComponentRunError::Start { err: err }
             })?;
-        let multicast: MulticastBus<Types::BusTypes, Types::Ctx> =
-            MulticastBus::create(
-                config,
-                Some(self.self_party),
-                ctx,
-                recv,
-                msgs
-            )
-            .map_err(|err| {
-                MulticastClientComponentRunError::Multicast { err: err }
-            })?;
-        let Ok(parties) = multicast.parties();
-        let session_cleanup = session.start(parties).map_err(|err| {
-            MulticastClientComponentRunError::Start { err: err }
-        })?;
-
-        debug!(target: "multicast-client-component",
-               "starting multicaster");
-
-        let multicast_cleanup = multicast
-            .start()
-            .map_err(|err| MulticastClientComponentRunError::IO { err: err })?;
 
         Ok(MulticastClientComponentCleanup {
-            shutdown: shutdown,
-            multicast: multicast_cleanup,
+            multicast: multicast,
             session: session_cleanup
         })
     }
 }
 
-impl<Session> MulticastClientComponentCleanup<Session>
+impl<Types> MulticastClientComponentCleanup<Types>
 where
-    Session: ClientSessionCleanup
+    Types: 'static + MulticastClientComponentTypes
 {
     pub fn cleanup(self) {
-        let MulticastClientComponentCleanup {
-            mut shutdown,
-            multicast,
-            session
-        } = self;
+        let MulticastClientComponentCleanup { multicast, session } = self;
 
-        //        shutdown.set();
         multicast.cleanup();
         session.cleanup();
     }
@@ -312,72 +428,3 @@ where
         }
     }
 }
-/*
-// ISSUE #2: Delete from here
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum TestCred {
-    IP { addr: SocketAddr },
-    Unix { addr: UnixSocketAddr }
-}
-
-impl<Basic> From<SSLCred<CompoundFarChannelSessionCred<Basic>>> for TestCred
-where
-    TestCred: From<Basic>
-{
-    fn from(_val: SSLCred<CompoundFarChannelSessionCred<Basic>>) -> TestCred {
-        panic!("Not supported!")
-    }
-}
-
-impl From<CompoundFarIPChannelXfrmPeerAddr> for TestCred {
-    fn from(val: CompoundFarIPChannelXfrmPeerAddr) -> TestCred {
-        match val {
-            CompoundFarIPChannelXfrmPeerAddr::UDP { udp } => {
-                TestCred::IP { addr: udp }
-            }
-            _ => panic!("Not supported!")
-        }
-    }
-}
-
-impl From<CompoundFarChannelXfrmPeerAddr> for TestCred {
-    fn from(val: CompoundFarChannelXfrmPeerAddr) -> TestCred {
-        match val {
-            CompoundFarChannelXfrmPeerAddr::Unix { unix } => {
-                TestCred::Unix { addr: unix }
-            }
-            CompoundFarChannelXfrmPeerAddr::IP { ip } => TestCred::from(ip)
-        }
-    }
-}
-
-impl<Basic> From<CompoundFarChannelSessionCred<Basic>> for TestCred
-where
-    TestCred: From<Basic>
-{
-    fn from(val: CompoundFarChannelSessionCred<Basic>) -> TestCred {
-        match val {
-            CompoundFarChannelSessionCred::Basic { basic } => {
-                TestCred::from(basic)
-            }
-            _ => panic!("Not supported!")
-        }
-    }
-}
-
-impl Display for TestCred {
-    #[inline]
-    fn fmt(
-        &self,
-        f: &mut Formatter<'_>
-    ) -> Result<(), std::fmt::Error> {
-        match self {
-            TestCred::IP { addr } => write!(f, "ip://{}", addr),
-            TestCred::Unix { addr } => write!(f, "unix://{}", addr)
-        }
-    }
-}
-
-// ISSUE #2: to here
-*/

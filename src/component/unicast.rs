@@ -22,28 +22,26 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
 use std::io::Error;
-use std::net::SocketAddr;
 
-use constellation_auth::authn::AuthNed;
 use constellation_auth::authn::AuthNMsgRecv;
-use constellation_auth::cred::SSLCred;
-use constellation_channels::far::compound::CompoundFarChannelSessionCred;
-use constellation_channels::far::compound::CompoundFarChannelXfrmPeerAddr;
-use constellation_channels::far::compound::CompoundFarIPChannelXfrmPeerAddr;
+use constellation_auth::authn::AuthNed;
 use constellation_channels::resolve::cache::NSNameCachesCtx;
+use constellation_common::config::Create;
 use constellation_common::config::CreateWithParam;
-use constellation_common::shutdown::ShutdownFlag;
+use constellation_common::hashid::HashAlgo;
+use constellation_common::hashid::HashID;
+use constellation_component_common::bus::types::UnicastLargeObjBusTypes;
+use constellation_component_common::bus::unicast::UnicastLargeObjBus;
+use constellation_component_common::bus::unicast::UnicastLargeObjBusCreateError;
 use constellation_component_common::config::UnicastLargeObjBusConfig;
-use constellation_component_common::bus::unicast::UnicastBus;
-use constellation_component_common::bus::unicast::UnicastBusCleanup;
-use constellation_component_common::bus::unicast::UnicastBusCreateError;
-use constellation_component_common::bus::unicast::UnicastBusTypes;
-use constellation_streams::config::PrivateLargeObjModeConfig;
-use constellation_streams::large_obj::LargeObjProtoTypes;
-use constellation_streams::select::StreamSelectorCreateError;
-use constellation_streams::threads::poll::PollThreadCreateError;
-use constellation_streams::threads::poll::PollThreadTypes;
-use log::debug;
+use constellation_component_common::config::XactBatchCodecConfig;
+use constellation_component_common::xact::XactBatch;
+use constellation_component_common::xact::XactBatchCodecCreateError;
+use constellation_component_common::xact::XactCommittedRoundCodecCreateError;
+use constellation_component_common::xact::XactNotifyCodecCreateError;
+use constellation_component_common::xact::XactReqCodecCreateError;
+use constellation_component_common::xact::XactSealedCodecCreateError;
+use constellation_streams::large_obj::LargeObjProtoCreateError;
 use log::info;
 
 use crate::config::UnicastClientConfig;
@@ -51,107 +49,179 @@ use crate::session::ClientSessionCleanup;
 use crate::session::UnicastClientSession;
 
 pub trait UnicastClientComponentTypes {
-    type InMsg;
-    type OutMsg;
-    type AuthNMsg: AuthNed<Self::MsgPrin, Self::InMsg>;
-    type Addr: 'static + Clone + Debug + Display + Eq + Hash + Send;
-    type Ctx: 'static + NSNameCachesCtx + Send;
-    type MsgPrin: Clone + Display + Eq + Hash;
-    type SessionPrin: Clone + Debug + Display + Eq + Hash;
-    type ChansConfig: Default;
-    type ChansCreateError: Debug + Display;
-    type Msgs: 'static + Send;
-    type Recv: 'static
-        + AuthNMsgRecv<
-            Self::MsgPrin,
-            Self::InMsg,
-            Self::AuthNMsg,
-        >
-        + Send;
-    type MsgAuthConfig;
-    type MsgAuthCreateError: Debug + Display;
-    type ThreadTypes: PollThreadTypes<
-        Self::Ctx,
-        Addr = Self::Addr,
-        InMsg = Self::InMsg,
-        AuthNMsg = Self::AuthNMsg,
-        MsgPrin = Self::MsgPrin,
-        SessionPrin = Self::SessionPrin,
-        Msgs = Self::Msgs,
-        Recv = Self::Recv,
-        ChansConfig = Self::ChansConfig,
-        ChansCreateError = Self::ChansCreateError,
-        MsgAuthConfig = Self::MsgAuthConfig,
-        MsgAuthCreateError = Self::MsgAuthCreateError
-    >;
+    type RoundID: Clone + From<u128> + Into<u128>;
+    type Seal;
+    type SealCodecConfig: Default;
+    type SealCodecCreateError: Debug + Display;
+    type Payload;
+    type PayloadCodecConfig: Default;
+    type PayloadCodecCreateError: Debug + Display;
+    type Effect;
+    type EffectCodecConfig: Default;
+    type EffectCodecCreateError: Debug + Display;
+    type Result;
+    type ResultCodecConfig: Default;
+    type ResultCodecCreateError: Debug + Display;
+    type Error;
+    type ErrorCodecConfig: Default;
+    type ErrorCodecCreateError: Debug + Display;
+    type HashID: Clone + Display + Eq + Hash + HashID;
+    type Hash: Default
+        + HashAlgo<HashID = Self::HashID>
+        + Create<Config = Self::HashConfig, CreateError = Self::HashCreateError>;
+    type HashConfig: Default;
+    type HashCreateError: Debug + Display;
+    type IDsConfig: Default;
+    type IDsCreateError: Debug + Display;
+    type ResolverConfig: Default;
     type EpochsConfig: Default;
-    type EpochsCreateError: Debug + Display;
-    type ModeCreateError: Debug + Display;
-    type ResolveCreateError: Debug + Display;
-    type BusTypes: UnicastBusTypes<
-        Self::Ctx,
-        Addr = Self::Addr,
-        InMsg = Self::InMsg,
-        MsgPrin = Self::MsgPrin,
-        AuthNMsg = Self::AuthNMsg,
-        Msgs = Self::Msgs,
-        Recv = Self::Recv,
-        ThreadTypes = Self::ThreadTypes,
-        EpochsConfig = Self::EpochsConfig,
-        EpochsCreateError = Self::EpochsCreateError,
-        ResolveCreateError = Self::ResolveCreateError,
-        ModeConfig = PrivateLargeObjModeConfig,
-        ModeCreateError = Self::ModeCreateError,
-        ChansConfig = Self::ChansConfig,
-        ChansCreateError = Self::ChansCreateError,
-        MsgAuthConfig = Self::MsgAuthConfig,
-        MsgAuthCreateError = Self::MsgAuthCreateError
-    > + Send;
+    type SessionAuthConfig;
+    type MsgAuthConfig;
+    type LargeObjMsgAuthConfig;
+    type UnixConfig: Default;
+    type UDPConfig: Default;
+    type MsgAuthCreateError: Debug + Display;
+    type AuthNMsg: AuthNed<Self::MsgPrin>;
+    type MsgPrin: Clone + Display + Eq + Hash;
+    type Msgs: 'static + Send;
+    type Recv: 'static + AuthNMsgRecv<Self::MsgPrin, Self::AuthNMsg> + Send;
+    type Ctx: 'static + NSNameCachesCtx + Send;
     type SessionArgs;
     type SessionConfig;
-    type SessionTypes: LargeObjProtoTypes<
-        Self::InMsg, Self::OutMsg,
-        Msgs = Self::Msgs,
-        Recv = Self::Recv,
-        AuthNMsg = Self::AuthNMsg,
-        Prin = Self::MsgPrin,
-        SessionPrin = Self::SessionPrin
-    >;
     type SessionCleanup: ClientSessionCleanup;
     type SessionCreateError: Debug + Display;
     type SessionStartError: Debug + Display;
     type Session: UnicastClientSession<
-        Self::SessionTypes,
-        Self::InMsg,
-        Self::OutMsg,
-        Self::SessionArgs,
-        Cleanup = Self::SessionCleanup,
-        StartError = Self::SessionStartError,
-        Config = Self::SessionConfig,
-        CreateError = Self::SessionCreateError
-    >;
+            Self::Recv,
+            Self::Msgs,
+            Self::SessionArgs,
+            Cleanup = Self::SessionCleanup,
+            Config = Self::SessionConfig,
+            CreateError = Self::SessionCreateError,
+            StartError = Self::SessionStartError
+        >;
+    type BusTypes: UnicastLargeObjBusTypes<
+            Self::Ctx,
+            InMsg = XactBatch<
+                Self::RoundID,
+                Self::HashID,
+                Self::Seal,
+                Self::Payload,
+                Self::Effect,
+                Self::Result,
+                Self::Error
+            >,
+            MsgPrin = Self::MsgPrin,
+            AuthNMsg = Self::AuthNMsg,
+            Msgs = Self::Msgs,
+            Recv = Self::Recv,
+            EpochsConfig = Self::EpochsConfig,
+            UnixConfig = Self::UnixConfig,
+            UDPConfig = Self::UDPConfig,
+            HashConfig = Self::HashConfig,
+            HashCreateError = Self::HashCreateError,
+            ResolverConfig = Self::ResolverConfig,
+            SessionAuthConfig = Self::SessionAuthConfig,
+            LargeObjMsgAuthConfig = Self::LargeObjMsgAuthConfig,
+            MsgAuthConfig = Self::MsgAuthConfig,
+            MsgAuthCreateError = Self::MsgAuthCreateError,
+            DecoderConfig = XactBatchCodecConfig<
+                Self::SealCodecConfig,
+                Self::PayloadCodecConfig,
+                Self::EffectCodecConfig,
+                Self::ResultCodecConfig,
+                Self::ErrorCodecConfig
+            >,
+            DecoderCreateError = XactBatchCodecCreateError<
+                XactSealedCodecCreateError<
+                    Self::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        Self::PayloadCodecCreateError,
+                        Self::EffectCodecCreateError
+                    >
+                >,
+                XactCommittedRoundCodecCreateError<
+                    Self::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        Self::PayloadCodecCreateError,
+                        Self::EffectCodecCreateError
+                    >
+                >,
+                XactNotifyCodecCreateError<
+                    Self::ResultCodecCreateError,
+                    Self::ErrorCodecCreateError
+                >
+            >,
+            EncoderConfig = XactBatchCodecConfig<
+                Self::SealCodecConfig,
+                Self::PayloadCodecConfig,
+                Self::EffectCodecConfig,
+                Self::ResultCodecConfig,
+                Self::ErrorCodecConfig
+            >,
+            EncoderCreateError = XactBatchCodecCreateError<
+                XactSealedCodecCreateError<
+                    Self::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        Self::PayloadCodecCreateError,
+                        Self::EffectCodecCreateError
+                    >
+                >,
+                XactCommittedRoundCodecCreateError<
+                    Self::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        Self::PayloadCodecCreateError,
+                        Self::EffectCodecCreateError
+                    >
+                >,
+                XactNotifyCodecCreateError<
+                    Self::ResultCodecCreateError,
+                    Self::ErrorCodecCreateError
+                >
+            >,
+            IDsConfig = Self::IDsConfig,
+            IDsCreateError = Self::IDsCreateError
+        > + Send;
 }
 
 pub struct UnicastClientComponent<Types>
 where
     Types: UnicastClientComponentTypes {
     config: UnicastLargeObjBusConfig<
-        Types::ChansConfig,
+        Types::HashConfig,
+        Types::SessionAuthConfig,
+        Types::LargeObjMsgAuthConfig,
+        Types::UnixConfig,
+        Types::UDPConfig,
+        XactBatchCodecConfig<
+            Types::SealCodecConfig,
+            Types::PayloadCodecConfig,
+            Types::EffectCodecConfig,
+            Types::ResultCodecConfig,
+            Types::ErrorCodecConfig
+        >,
+        XactBatchCodecConfig<
+            Types::SealCodecConfig,
+            Types::PayloadCodecConfig,
+            Types::EffectCodecConfig,
+            Types::ResultCodecConfig,
+            Types::ErrorCodecConfig
+        >,
+        Types::IDsConfig,
+        Types::ResolverConfig,
         Types::EpochsConfig,
-        Types::MsgAuthConfig,
-        Types::Addr
+        Types::MsgAuthConfig
     >,
     session_args: Types::SessionArgs,
     session_config: Types::SessionConfig,
     ctx: Types::Ctx
 }
 
-pub struct UnicastClientComponentCleanup<Session>
+pub struct UnicastClientComponentCleanup<Types>
 where
-    Session: ClientSessionCleanup {
-    shutdown: ShutdownFlag,
-    unicast: UnicastBusCleanup,
-    session: Session
+    Types: UnicastClientComponentTypes {
+    unicast: UnicastLargeObjBus<Types::BusTypes, Types::Ctx>,
+    session: Types::SessionCleanup
 }
 
 pub struct UnicastClientParam<Ctx, Args> {
@@ -184,23 +254,44 @@ impl<Ctx, Args> UnicastClientParam<Ctx, Args> {
 impl<Types> CreateWithParam<UnicastClientParam<Types::Ctx, Types::SessionArgs>>
     for UnicastClientComponent<Types>
 where
-    Types: UnicastClientComponentTypes {
+    Types: UnicastClientComponentTypes
+{
     type Config = UnicastClientConfig<
         Types::SessionConfig,
-        Types::ChansConfig,
+        Types::SealCodecConfig,
+        Types::PayloadCodecConfig,
+        Types::EffectCodecConfig,
+        Types::ResultCodecConfig,
+        Types::ErrorCodecConfig,
+        Types::HashConfig,
+        Types::SessionAuthConfig,
+        Types::LargeObjMsgAuthConfig,
+        Types::UnixConfig,
+        Types::UDPConfig,
+        Types::IDsConfig,
+        Types::ResolverConfig,
         Types::EpochsConfig,
-        Types::MsgAuthConfig,
-        Types::Addr
+        Types::MsgAuthConfig
     >;
     type CreateError = Infallible;
 
     fn create(
         config: UnicastClientConfig<
             Types::SessionConfig,
-            Types::ChansConfig,
+            Types::SealCodecConfig,
+            Types::PayloadCodecConfig,
+            Types::EffectCodecConfig,
+            Types::ResultCodecConfig,
+            Types::ErrorCodecConfig,
+            Types::HashConfig,
+            Types::SessionAuthConfig,
+            Types::LargeObjMsgAuthConfig,
+            Types::UnixConfig,
+            Types::UDPConfig,
+            Types::IDsConfig,
+            Types::ResolverConfig,
             Types::EpochsConfig,
-            Types::MsgAuthConfig,
-            Types::Addr
+            Types::MsgAuthConfig
         >,
         param: UnicastClientParam<Types::Ctx, Types::SessionArgs>
     ) -> Result<Self, Self::CreateError> {
@@ -218,49 +309,79 @@ where
 
 impl<Types> UnicastClientComponent<Types>
 where
-    Types: UnicastClientComponentTypes {
+    Types: 'static + UnicastClientComponentTypes
+{
     pub fn start(
         self
     ) -> Result<
-        UnicastClientComponentCleanup<Types::SessionCleanup>,
+        UnicastClientComponentCleanup<Types>,
         UnicastClientComponentRunError<
             Types::SessionCreateError,
-            UnicastBusCreateError<
-                PollThreadCreateError<
-                    Types::ModeCreateError,
-                    Types::ChansCreateError,
-                    StreamSelectorCreateError<
-                        Types::ResolveCreateError,
-                        Types::EpochsCreateError
+            UnicastLargeObjBusCreateError<
+                Types::HashCreateError,
+                Types::MsgAuthCreateError,
+                LargeObjProtoCreateError<
+                    XactBatchCodecCreateError<
+                        XactSealedCodecCreateError<
+                            Types::SealCodecCreateError,
+                            XactReqCodecCreateError<
+                                Types::PayloadCodecCreateError,
+                                Types::EffectCodecCreateError
+                            >
+                        >,
+                        XactCommittedRoundCodecCreateError<
+                            Types::SealCodecCreateError,
+                            XactReqCodecCreateError<
+                                Types::PayloadCodecCreateError,
+                                Types::EffectCodecCreateError
+                            >
+                        >,
+                        XactNotifyCodecCreateError<
+                            Types::ResultCodecCreateError,
+                            Types::ErrorCodecCreateError
+                        >
                     >,
-                    Types::MsgAuthCreateError
+                    XactBatchCodecCreateError<
+                        XactSealedCodecCreateError<
+                            Types::SealCodecCreateError,
+                            XactReqCodecCreateError<
+                                Types::PayloadCodecCreateError,
+                                Types::EffectCodecCreateError
+                            >
+                        >,
+                        XactCommittedRoundCodecCreateError<
+                            Types::SealCodecCreateError,
+                            XactReqCodecCreateError<
+                                Types::PayloadCodecCreateError,
+                                Types::EffectCodecCreateError
+                            >
+                        >,
+                        XactNotifyCodecCreateError<
+                            Types::ResultCodecCreateError,
+                            Types::ErrorCodecCreateError
+                        >
+                    >,
+                    Types::IDsCreateError
                 >
             >,
-            Types::SessionStartError,
+            Types::SessionStartError
         >
-    >{
+    > {
         let UnicastClientComponent {
             config,
             session_args,
             session_config,
-            ctx,
+            ctx
         } = self;
 
         info!(target: "unicast-client-component",
               "starting unicast client component");
 
         let (session, recv, msgs) =
-            Types::Session::create(session_config, session_args)
-            .map_err(|err| {
-                UnicastClientComponentRunError::Session { err: err }
-            })?;
-        let unicast: UnicastBus<Types::BusTypes, Types::Ctx> =
-            UnicastBus::create(
-                config,
-                ctx,
-                recv,
-                msgs
-            )
+            Types::Session::create(session_config, session_args).map_err(
+                |err| UnicastClientComponentRunError::Session { err: err }
+            )?;
+        let unicast = UnicastLargeObjBus::start(config, ctx, recv, msgs)
             .map_err(|err| UnicastClientComponentRunError::Unicast {
                 err: err
             })?;
@@ -268,33 +389,20 @@ where
             UnicastClientComponentRunError::Start { err: err }
         })?;
 
-        debug!(target: "unicast-client-component",
-               "starting unicaster");
-
-        let unicast_cleanup = unicast
-            .start()
-            .map_err(|err| UnicastClientComponentRunError::IO { err: err })?;
-
         Ok(UnicastClientComponentCleanup {
-            shutdown: shutdown,
-            unicast: unicast_cleanup,
+            unicast: unicast,
             session: session_cleanup
         })
     }
 }
 
-impl<Session> UnicastClientComponentCleanup<Session>
+impl<Types> UnicastClientComponentCleanup<Types>
 where
-    Session: ClientSessionCleanup
+    Types: 'static + UnicastClientComponentTypes
 {
     pub fn cleanup(self) {
-        let UnicastClientComponentCleanup {
-            mut shutdown,
-            unicast,
-            session
-        } = self;
+        let UnicastClientComponentCleanup { unicast, session } = self;
 
-        shutdown.set();
         unicast.cleanup();
         session.cleanup();
     }
@@ -322,72 +430,3 @@ where
         }
     }
 }
-/*
-// ISSUE #2: Delete from here
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum TestCred {
-    IP { addr: SocketAddr },
-    Unix { addr: UnixSocketAddr }
-}
-
-impl<Basic> From<SSLCred<CompoundFarChannelSessionCred<Basic>>> for TestCred
-where
-    TestCred: From<Basic>
-{
-    fn from(_val: SSLCred<CompoundFarChannelSessionCred<Basic>>) -> TestCred {
-        panic!("Not supported!")
-    }
-}
-
-impl From<CompoundFarIPChannelXfrmPeerAddr> for TestCred {
-    fn from(val: CompoundFarIPChannelXfrmPeerAddr) -> TestCred {
-        match val {
-            CompoundFarIPChannelXfrmPeerAddr::UDP { udp } => {
-                TestCred::IP { addr: udp }
-            }
-            _ => panic!("Not supported!")
-        }
-    }
-}
-
-impl From<CompoundFarChannelXfrmPeerAddr> for TestCred {
-    fn from(val: CompoundFarChannelXfrmPeerAddr) -> TestCred {
-        match val {
-            CompoundFarChannelXfrmPeerAddr::Unix { unix } => {
-                TestCred::Unix { addr: unix }
-            }
-            CompoundFarChannelXfrmPeerAddr::IP { ip } => TestCred::from(ip)
-        }
-    }
-}
-
-impl<Basic> From<CompoundFarChannelSessionCred<Basic>> for TestCred
-where
-    TestCred: From<Basic>
-{
-    fn from(val: CompoundFarChannelSessionCred<Basic>) -> TestCred {
-        match val {
-            CompoundFarChannelSessionCred::Basic { basic } => {
-                TestCred::from(basic)
-            }
-            _ => panic!("Not supported!")
-        }
-    }
-}
-
-impl Display for TestCred {
-    #[inline]
-    fn fmt(
-        &self,
-        f: &mut Formatter<'_>
-    ) -> Result<(), std::fmt::Error> {
-        match self {
-            TestCred::IP { addr } => write!(f, "ip://{}", addr),
-            TestCred::Unix { addr } => write!(f, "unix://{}", addr)
-        }
-    }
-}
-
-// ISSUE #2: to here
-*/
