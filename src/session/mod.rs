@@ -21,6 +21,9 @@ use std::fmt::Display;
 
 use constellation_streams::multicast::MulticastStreamIdx;
 
+pub mod oneshot;
+pub mod processor;
+
 pub trait MulticastClientSession<Prin, Recv, Msgs, Args>: Sized {
     type Config;
     type CreateError: Debug + Display;

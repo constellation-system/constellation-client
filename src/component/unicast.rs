@@ -20,22 +20,17 @@ use std::convert::Infallible;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::hash::Hash;
 use std::io::Error;
 
 use constellation_auth::authn::AuthNMsgRecv;
-use constellation_auth::authn::AuthNed;
 use constellation_channels::resolve::cache::NSNameCachesCtx;
-use constellation_common::config::Create;
 use constellation_common::config::CreateWithParam;
-use constellation_common::hashid::HashAlgo;
-use constellation_common::hashid::HashID;
 use constellation_component_common::bus::types::UnicastLargeObjBusTypes;
 use constellation_component_common::bus::unicast::UnicastLargeObjBus;
 use constellation_component_common::bus::unicast::UnicastLargeObjBusCreateError;
 use constellation_component_common::config::UnicastLargeObjBusConfig;
 use constellation_component_common::config::XactBatchCodecConfig;
-use constellation_component_common::xact::XactBatch;
+use constellation_component_common::xact::XactHashBatch;
 use constellation_component_common::xact::XactBatchCodecCreateError;
 use constellation_component_common::xact::XactCommittedRoundCodecCreateError;
 use constellation_component_common::xact::XactNotifyCodecCreateError;
@@ -44,45 +39,22 @@ use constellation_component_common::xact::XactSealedCodecCreateError;
 use constellation_streams::large_obj::LargeObjProtoCreateError;
 use log::info;
 
+use crate::component::ClientComponentTypes;
 use crate::config::UnicastClientConfig;
 use crate::session::ClientSessionCleanup;
 use crate::session::UnicastClientSession;
 
-pub trait UnicastClientComponentTypes {
-    type RoundID: Clone + From<u128> + Into<u128>;
-    type Seal;
-    type SealCodecConfig: Default;
-    type SealCodecCreateError: Debug + Display;
-    type Payload;
-    type PayloadCodecConfig: Default;
-    type PayloadCodecCreateError: Debug + Display;
-    type Effect;
-    type EffectCodecConfig: Default;
-    type EffectCodecCreateError: Debug + Display;
-    type Result;
-    type ResultCodecConfig: Default;
-    type ResultCodecCreateError: Debug + Display;
-    type Error;
-    type ErrorCodecConfig: Default;
-    type ErrorCodecCreateError: Debug + Display;
-    type HashID: Clone + Display + Eq + Hash + HashID;
-    type Hash: Default
-        + HashAlgo<HashID = Self::HashID>
-        + Create<Config = Self::HashConfig, CreateError = Self::HashCreateError>;
-    type HashConfig: Default;
-    type HashCreateError: Debug + Display;
-    type IDsConfig: Default;
-    type IDsCreateError: Debug + Display;
+pub trait UnicastClientComponentTypes: ClientComponentTypes {
     type ResolverConfig: Default;
     type EpochsConfig: Default;
     type SessionAuthConfig;
     type MsgAuthConfig;
     type LargeObjMsgAuthConfig;
+    type IDsConfig: Default;
+    type IDsCreateError: Debug + Display;
     type UnixConfig: Default;
     type UDPConfig: Default;
     type MsgAuthCreateError: Debug + Display;
-    type AuthNMsg: AuthNed<Self::MsgPrin>;
-    type MsgPrin: Clone + Display + Eq + Hash;
     type Msgs: 'static + Send;
     type Recv: 'static + AuthNMsgRecv<Self::MsgPrin, Self::AuthNMsg> + Send;
     type Ctx: 'static + NSNameCachesCtx + Send;
@@ -102,7 +74,7 @@ pub trait UnicastClientComponentTypes {
         >;
     type BusTypes: UnicastLargeObjBusTypes<
             Self::Ctx,
-            InMsg = XactBatch<
+            InMsg = XactHashBatch<
                 Self::RoundID,
                 Self::HashID,
                 Self::Seal,
