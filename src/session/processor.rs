@@ -113,7 +113,6 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                                                 Types::Result, Types::Error>>>,
     proc: Mutex<Proc>,
     notify: Mutex<Option<Notify>>,
-    retry: Retry,
     resubmit: Retry,
 }
 
@@ -141,7 +140,6 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
 
 pub struct ProcessorArgs {
     resubmit: Retry,
-    retry: Retry
 }
 
 pub struct ProcessorSessionCleanup;
@@ -726,7 +724,7 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
              ProcessorSessionMsgs<Types, Proc>),
         Self::CreateError
     > {
-        let ProcessorArgs { retry, resubmit } = args;
+        let ProcessorArgs { resubmit } = args;
         let class =
             Uuid::new_v5(&Uuid::NAMESPACE_DNS, Proc::SERVICE_NAME.as_bytes());
         let version = Version::new(0, 0, 0);
@@ -734,7 +732,6 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
         let state = ProcessorState {
             pending: Mutex::new(HashMap::new()),
             resubmit: resubmit,
-            retry: retry,
             proc: Mutex::new(proc),
             notify: Mutex::new(None)
         };

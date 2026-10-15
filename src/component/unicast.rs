@@ -45,13 +45,13 @@ use crate::session::ClientSessionCleanup;
 use crate::session::UnicastClientSession;
 
 pub trait UnicastClientComponentTypes: ClientComponentTypes {
+    type IDsConfig: Default;
+    type IDsCreateError: Debug + Display;
     type ResolverConfig: Default;
     type EpochsConfig: Default;
     type SessionAuthConfig;
     type MsgAuthConfig;
     type LargeObjMsgAuthConfig;
-    type IDsConfig: Default;
-    type IDsCreateError: Debug + Display;
     type UnixConfig: Default;
     type UDPConfig: Default;
     type MsgAuthCreateError: Debug + Display;

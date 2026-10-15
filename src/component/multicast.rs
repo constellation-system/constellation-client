@@ -24,13 +24,9 @@ use std::hash::Hash;
 use std::io::Error;
 
 use constellation_auth::authn::AuthNMsgRecv;
-use constellation_auth::authn::AuthNed;
 use constellation_channels::resolve::cache::NSNameCachesCtx;
-use constellation_common::config::Create;
 use constellation_common::config::CreateWithParam;
 use constellation_common::error::MutexPoison;
-use constellation_common::hashid::HashAlgo;
-use constellation_common::hashid::HashID;
 use constellation_component_common::bus::multicast::MulticastLargeObjBus;
 use constellation_component_common::bus::multicast::MulticastLargeObjBusCreateError;
 use constellation_component_common::bus::types::MulticastLargeObjBusTypes;
@@ -44,33 +40,13 @@ use constellation_component_common::xact::XactSealedCodecCreateError;
 use constellation_streams::large_obj::LargeObjProtoCreateError;
 use log::info;
 
+use crate::component::ClientComponentTypes;
 use crate::config::MulticastClientConfig;
 use crate::session::ClientSessionCleanup;
 use crate::session::MulticastClientSession;
 
-pub trait MulticastClientComponentTypes {
-    type RoundID: Clone + From<u128> + Into<u128>;
-    type Seal;
-    type SealCodecConfig: Default;
-    type SealCodecCreateError: Debug + Display;
-    type Payload;
-    type PayloadCodecConfig: Default;
-    type PayloadCodecCreateError: Debug + Display;
-    type Effect;
-    type EffectCodecConfig: Default;
-    type EffectCodecCreateError: Debug + Display;
-    type Result;
-    type ResultCodecConfig: Default;
-    type ResultCodecCreateError: Debug + Display;
-    type Error;
-    type ErrorCodecConfig: Default;
-    type ErrorCodecCreateError: Debug + Display;
-    type HashID: Clone + Display + Eq + Hash + HashID;
-    type Hash: Default
-        + HashAlgo<HashID = Self::HashID>
-        + Create<Config = Self::HashConfig, CreateError = Self::HashCreateError>;
-    type HashConfig: Default;
-    type HashCreateError: Debug + Display;
+pub trait MulticastClientComponentTypes: ClientComponentTypes {
+    type SessionPrin: Clone + Debug + Default + Eq + Hash + Send;
     type IDsConfig: Default;
     type IDsCreateError: Debug + Display;
     type ResolverConfig: Default;
@@ -81,8 +57,6 @@ pub trait MulticastClientComponentTypes {
     type UnixConfig: Default;
     type UDPConfig: Default;
     type MsgAuthCreateError: Debug + Display;
-    type AuthNMsg: AuthNed<Self::MsgPrin>;
-    type MsgPrin: Clone + Display + Eq + Hash;
     type Msgs: 'static + Send;
     type Recv: 'static + AuthNMsgRecv<Self::MsgPrin, Self::AuthNMsg> + Send;
     type Ctx: 'static + NSNameCachesCtx + Send;
@@ -92,7 +66,7 @@ pub trait MulticastClientComponentTypes {
     type SessionCreateError: Debug + Display;
     type SessionStartError: Debug + Display;
     type Session: MulticastClientSession<
-            String,
+            Self::SessionPrin,
             Self::Recv,
             Self::Msgs,
             Self::SessionArgs,
@@ -103,7 +77,7 @@ pub trait MulticastClientComponentTypes {
         >;
     type BusTypes: MulticastLargeObjBusTypes<
             Self::Ctx,
-            SessionPrin = String,
+            SessionPrin = Self::SessionPrin,
             Msgs = Self::Msgs,
             Recv = Self::Recv,
             EpochsConfig = Self::EpochsConfig,
@@ -179,7 +153,7 @@ pub struct MulticastClientComponent<Types>
 where
     Types: MulticastClientComponentTypes {
     config: MulticastLargeObjBusConfig<
-        String,
+        Types::SessionPrin,
         Types::HashConfig,
         Types::SessionAuthConfig,
         Types::LargeObjMsgAuthConfig,
@@ -250,6 +224,7 @@ where
     Types: MulticastClientComponentTypes
 {
     type Config = MulticastClientConfig<
+        Types::SessionPrin,
         Types::SessionConfig,
         Types::SealCodecConfig,
         Types::PayloadCodecConfig,
@@ -270,6 +245,7 @@ where
 
     fn create(
         config: MulticastClientConfig<
+            Types::SessionPrin,
             Types::SessionConfig,
             Types::SealCodecConfig,
             Types::PayloadCodecConfig,

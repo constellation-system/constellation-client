@@ -42,9 +42,9 @@ pub trait ClientComponentTypes {
     type HashConfig: Default;
     type HashCreateError: Debug + Display;
     type HashID: Clone + Display + Eq + Hash + HashID;
-    type Seal: Display;
-    type Payload: Display;
-    type Effect: Display;
+    type Seal: Clone + Display;
+    type Payload: Clone + Display;
+    type Effect: Clone + Display;
     type Result: Clone + Display;
     type Error: Clone + Display;
     type SealCodec: Create<Config = Self::SealCodecConfig,

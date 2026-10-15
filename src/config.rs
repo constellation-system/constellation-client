@@ -26,6 +26,7 @@ use serde::Serialize;
 #[serde(rename = "multicast-client")]
 #[serde(rename_all = "kebab-case")]
 pub struct MulticastClientConfig<
+    Prin,
     Session,
     Seal,
     Payload,
@@ -55,7 +56,7 @@ pub struct MulticastClientConfig<
     Resolver: Default {
     #[serde(flatten)]
     multicast: MulticastLargeObjBusConfig<
-        String,
+        Prin,
         Hash,
         AuthN,
         ProtoAuthN,
@@ -239,6 +240,7 @@ where
 }
 
 impl<
+    Prin,
     Session,
     Seal,
     Payload,
@@ -256,6 +258,7 @@ impl<
     MsgAuthN
 >
     MulticastClientConfig<
+        Prin,
         Session,
         Seal,
         Payload,
@@ -288,7 +291,7 @@ where
     #[inline]
     pub fn new(
         multicast: MulticastLargeObjBusConfig<
-            String,
+            Prin,
             Hash,
             AuthN,
             ProtoAuthN,
@@ -313,7 +316,7 @@ where
     pub fn multicast(
         &self
     ) -> &MulticastLargeObjBusConfig<
-        String,
+        Prin,
         Hash,
         AuthN,
         ProtoAuthN,
@@ -334,7 +337,7 @@ where
         self
     ) -> (
         MulticastLargeObjBusConfig<
-            String,
+            Prin,
             Hash,
             AuthN,
             ProtoAuthN,
