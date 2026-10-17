@@ -50,7 +50,7 @@ use crate::session::MulticastClientSession;
 
 pub trait MulticastClientComponentTypes<Types>
 where Types: ClientComponentTypes {
-    type SessionPrin: Clone + Debug + Eq + Hash + Send + for<'a> Deserialize<'a> + Serialize;
+    type SessionPrin: Clone + Debug + Display + Eq + Hash + Send + Sync + for<'a> Deserialize<'a> + Serialize;
     type IDsConfig: Default + for<'a> Deserialize<'a> + Serialize;
     type IDsCreateError: Debug + Display;
     type ResolverConfig: Default + for<'a> Deserialize<'a> + Serialize;
@@ -153,7 +153,7 @@ where Types: ClientComponentTypes {
         > + Send;
 }
 
-pub struct SimpleMulticastComponentTypes<ClientTypes, BusTypes, Session, Ctx>
+pub struct SimpleMulticastClientComponentTypes<ClientTypes, BusTypes, Session, Ctx>
 where Ctx: 'static + NSNameCachesCtx + Send
 {
     client_types: PhantomData<ClientTypes>,
@@ -221,7 +221,7 @@ pub enum MulticastClientComponentRunError<Session, Multicast, Start> {
 
 impl<ClientTypes, BusTypes, Session, Ctx>
     MulticastClientComponentTypes<ClientTypes>
-    for SimpleMulticastComponentTypes<ClientTypes, BusTypes, Session, Ctx>
+    for SimpleMulticastClientComponentTypes<ClientTypes, BusTypes, Session, Ctx>
 where
     ClientTypes: ClientComponentTypes,
     BusTypes: MulticastLargeObjBusTypes<

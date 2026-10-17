@@ -35,20 +35,21 @@ pub mod multicast;
 pub mod unicast;
 
 pub trait ClientComponentTypes {
-    type RoundID: Clone + Display + From<u128> + Into<u128>;
-    type MsgPrin: Clone + Display + Eq + Hash;
+    type RoundID: Clone + Display + From<u128> + Into<u128> + Send;
+    type MsgPrin: Clone + Debug + Display + Eq + Hash;
     type Hash: Clone + Default
         + HashAlgo<HashID = Self::HashID>
         + Create<Config = Self::HashConfig,
-                 CreateError = Self::HashCreateError>;
+                 CreateError = Self::HashCreateError>
+        + Send;
     type HashConfig: Default + for<'a> Deserialize<'a> + Serialize;
     type HashCreateError: Debug + Display;
-    type HashID: Clone + Display + Eq + Hash + HashID;
-    type Seal: Clone + Display;
-    type Payload: Clone + Display;
-    type Effect: Clone + Display;
-    type Result: Clone + Display;
-    type Error: Clone + Display;
+    type HashID: Clone + Debug + Display + Eq + Hash + HashID + Send;
+    type Seal: Clone + Display + Send;
+    type Payload: Clone + Display + Send;
+    type Effect: Clone + Display + Send;
+    type Result: Clone + Display + Send;
+    type Error: Clone + Display + Send;
     type SealCodec: Create<Config = Self::SealCodecConfig,
                            CreateError = Self::SealCodecCreateError>
         + Encoder<Self::Seal> + Decoder<Self::Seal>;

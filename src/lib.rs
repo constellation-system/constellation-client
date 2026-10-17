@@ -21,3 +21,5 @@
 pub mod component;
 pub mod config;
 pub mod session;
+#[cfg(feature = "standalone")]
+pub mod standalone;

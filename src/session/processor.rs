@@ -21,21 +21,36 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::io::Error;
 use std::marker::PhantomData;
+#[cfg(feature = "standalone")]
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+#[cfg(feature = "standalone")]
+use std::thread::JoinHandle;
 use std::time::Instant;
 
+#[cfg(feature = "standalone")]
+use clap::ArgMatches;
 use constellation_auth::authn::AuthNMsgRecv;
 use constellation_auth::authn::AuthNedDestruct;
+#[cfg(feature = "standalone")]
+use constellation_channels::resolve::cache::ThreadedNSNameCaches;
 use constellation_common::codec::Encoder;
+use constellation_common::config::CreateWithParam;
 use constellation_common::config::Create;
 use constellation_common::error::MutexPoison;
 use constellation_common::error::ScopedError;
 use constellation_common::error::WithMutexPoison;
 use constellation_common::hashid::HashID;
 use constellation_common::retry::Retry;
+#[cfg(feature = "standalone")]
+use constellation_common::shutdown::ShutdownFlag;
 use constellation_common::sync::Notify;
+#[cfg(feature = "standalone")]
+use constellation_common::version::FullVersion;
 use constellation_common::version::Version;
+#[cfg(feature = "standalone")]
+use constellation_common::version::VersionSuffix;
 use constellation_component_common::config::XactBatchCodecConfig;
 use constellation_component_common::xact::XactBatchCodecCreateError;
 use constellation_component_common::xact::XactCommittedEffects;
@@ -54,6 +69,10 @@ use constellation_component_common::xact::XactSealed;
 use constellation_component_common::xact::XactSealedCodecCreateError;
 use constellation_component_common::xact::XactLinPoint;
 use constellation_component_common::xact::XactUncommittedHashReq;
+#[cfg(feature = "standalone")]
+use constellation_standalone::Standalone;
+#[cfg(feature = "standalone")]
+use constellation_standalone::StandaloneService;
 use constellation_streams::frags::Frags;
 use constellation_streams::large_obj::LargeObjProtoAddOutboundError;
 use constellation_streams::large_obj::LargeObjMsgs;
@@ -64,16 +83,34 @@ use log::error;
 use log::info;
 use log::trace;
 use log::warn;
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
 
+#[cfg(feature = "standalone")]
+use crate::config::ProcessorClientConfig;
+use crate::config::ProcessorConfig;
 use crate::component::ClientComponentTypes;
+#[cfg(feature = "standalone")]
+use crate::component::unicast::SimpleUnicastClientComponentTypes;
 use crate::component::unicast::UnicastClientComponentCleanup;
+#[cfg(feature = "standalone")]
+use crate::component::unicast::UnicastClientComponent;
+use crate::component::unicast::UnicastClientComponentTypes;
+#[cfg(feature = "standalone")]
+use crate::component::unicast::UnicastClientParam;
 use crate::session::UnicastClientSession;
 use crate::session::ClientSessionCleanup;
+#[cfg(feature = "standalone")]
+use crate::standalone::StandaloneCtx;
 
 pub trait Processor<RoundID, Req, Eff, Res, Err>: Create
 where RoundID: Clone + From<u128> + Into<u128> {
     const SERVICE_NAME: &str;
+    #[cfg(feature = "standalone")]
+    const CONFIG_FILES: &[&str];
+    #[cfg(feature = "standalone")]
+    const DEFAULT_PIDFILE: &str;
 
     fn run_uncommitted(
         &mut self,
@@ -138,7 +175,7 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
     when: XactLinPoint<Types::RoundID>,
 }
 
-pub struct ProcessorArgs {
+pub struct ProcessorParams {
     resubmit: Retry,
 }
 
@@ -704,31 +741,31 @@ impl ClientSessionCleanup for ProcessorSessionCleanup {
 }
 
 impl<Types, Proc> UnicastClientSession<ProcessorSessionRecv<Types, Proc>,
-                                       ProcessorSessionMsgs<Types, Proc>,
-                                       ProcessorArgs>
+                                       ProcessorSessionMsgs<Types, Proc>>
     for ProcessorSession<Types, Proc>
 where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                       Types::Result, Types::Error>,
       Types: ClientComponentTypes {
     type Cleanup = ProcessorSessionCleanup;
-    type Config = Proc::Config;
+    type Config = ProcessorConfig<Proc::Config>;
+    type Param = ();
     type CreateError = Proc::CreateError;
     type StartError = MutexPoison;
 
     fn create(
         config: Self::Config,
-        args: ProcessorArgs
+        _param: ()
     ) -> Result<
             (Self,
              ProcessorSessionRecv<Types, Proc>,
              ProcessorSessionMsgs<Types, Proc>),
         Self::CreateError
     > {
-        let ProcessorArgs { resubmit } = args;
+        let (proc_config, resubmit) = config.take();
         let class =
             Uuid::new_v5(&Uuid::NAMESPACE_DNS, Proc::SERVICE_NAME.as_bytes());
         let version = Version::new(0, 0, 0);
-        let proc = Proc::create(config)?;
+        let proc = Proc::create(proc_config)?;
         let state = ProcessorState {
             pending: Mutex::new(HashMap::new()),
             resubmit: resubmit,
@@ -757,5 +794,207 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
 
     fn start(self) -> Result<Self::Cleanup, Self::StartError> {
         Ok(ProcessorSessionCleanup)
+    }
+}
+
+#[cfg(feature = "standalone")]
+pub struct StandaloneProcessorCreateCleanup {
+    shutdown: ShutdownFlag,
+    caches_join: JoinHandle<()>
+}
+
+#[cfg(feature = "standalone")]
+pub struct StandaloneProcessorRunCleanup<ClientTypes, Types>
+where
+    ClientTypes: ClientComponentTypes,
+    Types: UnicastClientComponentTypes<ClientTypes> {
+    component: UnicastClientComponentCleanup<ClientTypes, Types>
+}
+
+#[cfg(feature = "standalone")]
+pub struct StandaloneProcessor<ClientTypes, Types, Proc>
+where
+    ClientTypes: ClientComponentTypes,
+    Types: UnicastClientComponentTypes<ClientTypes>,
+    Proc: Processor<ClientTypes::RoundID, ClientTypes::Payload,
+                    ClientTypes::Effect, ClientTypes::Result,
+                    ClientTypes::Error> {
+    proc: PhantomData<Proc>,
+    component: UnicastClientComponent<ClientTypes, Types>
+}
+
+#[cfg(feature = "standalone")]
+type StandaloneMulticastClientComponentTypes<ClientTypes, BusTypes, App> =
+    SimpleUnicastClientComponentTypes<
+        ClientTypes,
+        BusTypes,
+        ProcessorSession<ClientTypes, App>,
+        StandaloneCtx
+    >;
+
+#[cfg(feature = "standalone")]
+impl<ClientTypes, Types>
+    StandaloneProcessorRunCleanup<ClientTypes, Types>
+where
+    ClientTypes: 'static + ClientComponentTypes,
+    Types: 'static + UnicastClientComponentTypes<ClientTypes> {
+    fn cleanup(self) {
+        self.component.cleanup()
+    }
+}
+
+#[cfg(feature = "standalone")]
+impl<ClientTypes, Types, Proc> Standalone
+    for StandaloneProcessor<ClientTypes, Types, Proc>
+where
+    ClientTypes: ClientComponentTypes,
+    Types: UnicastClientComponentTypes<
+        ClientTypes,
+        Session = ProcessorSession<ClientTypes, Proc>,
+        SessionParam = (),
+        SessionConfig = ProcessorConfig<Proc::Config>,
+        Ctx = StandaloneCtx
+    >,
+    Proc: Processor<ClientTypes::RoundID, ClientTypes::Payload,
+                    ClientTypes::Effect, ClientTypes::Result,
+                    ClientTypes::Error>,
+    Proc::Config: for<'a> Deserialize<'a> + Serialize {
+    type Config = ProcessorClientConfig<
+        Proc::Config,
+        ClientTypes::SealCodecConfig,
+        ClientTypes::PayloadCodecConfig,
+        ClientTypes::EffectCodecConfig,
+        ClientTypes::ResultCodecConfig,
+        ClientTypes::ErrorCodecConfig,
+        ClientTypes::HashConfig,
+        Types::SessionAuthConfig,
+        Types::LargeObjMsgAuthConfig,
+        Types::UnixConfig,
+        Types::UDPConfig,
+        Types::IDsConfig,
+        Types::ResolverConfig,
+        Types::EpochsConfig,
+        Types::MsgAuthConfig
+    >;
+    type CreateCleanup = StandaloneProcessorCreateCleanup;
+
+    const CONFIG_FILES: &[&str] = Proc::CONFIG_FILES;
+    const NAME: &str = Proc::SERVICE_NAME;
+    const VERSION: FullVersion = FullVersion::new(
+        None,
+        Version::new(0, 0, 0),
+        Some(VersionSuffix::Development)
+    );
+
+    fn create(
+        args: ArgMatches,
+        config: Self::Config
+    ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
+        let (name_caches_config, client_config) = config.take();
+        let shutdown = ShutdownFlag::new();
+        let (caches, caches_join) =
+            ThreadedNSNameCaches::create(name_caches_config, shutdown.clone());
+        let ctx = StandaloneCtx {
+            caches: caches
+        };
+        let cleanup = StandaloneProcessorCreateCleanup {
+            shutdown: shutdown.clone(),
+            caches_join: caches_join
+        };
+        let param = UnicastClientParam::new((), ctx);
+        let component = UnicastClientComponent::create(client_config, param)
+            .map_err(|err| {
+                error!(target: "one-shot-standalone",
+                       "error creating multicast client: {}",
+                       err);
+
+                cleanup
+            })?;
+        let out = StandaloneProcessor {
+            proc: PhantomData,
+            component: component
+        };
+
+        Ok((out, cleanup))
+    }
+}
+
+#[cfg(feature = "standalone")]
+impl<ClientTypes, Types, Proc> StandaloneService
+    for StandaloneProcessor<ClientTypes, Types, Proc>
+where
+    ClientTypes: 'static + ClientComponentTypes,
+    Types: 'static + UnicastClientComponentTypes<
+        ClientTypes,
+        Session = ProcessorSession<ClientTypes, Proc>,
+        SessionParam = (),
+        SessionConfig = ProcessorConfig<Proc::Config>,
+        Ctx = StandaloneCtx
+    >,
+    Proc: Processor<ClientTypes::RoundID, ClientTypes::Payload,
+                    ClientTypes::Effect, ClientTypes::Result,
+                    ClientTypes::Error>,
+    Proc::Config: for<'a> Deserialize<'a> + Serialize {
+    const DEFAULT_PIDFILE: &str = Proc::DEFAULT_PIDFILE;
+
+    type RunCleanup = StandaloneProcessorRunCleanup<ClientTypes, Types>;
+    type RunErrorCleanup = ();
+
+    fn run(
+        self,
+        _rundir: PathBuf
+    ) -> Result<Self::RunCleanup, Self::RunErrorCleanup> {
+        match self.component.start() {
+            Ok(cleanup) => {
+                let cleanup = StandaloneProcessorRunCleanup {
+                    component: cleanup
+                };
+
+                Ok(cleanup)
+            }
+            Err(err) => {
+                error!(target: "processor",
+                       "{}", err);
+
+                Err(())
+            }
+        }
+    }
+
+    fn shutdown(
+        mut create_cleanup: Self::CreateCleanup,
+        run_cleanup: Option<Self::RunCleanup>
+    ) {
+        debug!(target: "processor",
+               "cleaning up processor");
+
+        create_cleanup.shutdown.set();
+
+        if let Some(cleanup) = run_cleanup {
+            debug!(target: "processor",
+               "cleaning up runtime");
+
+            cleanup.cleanup();
+        }
+
+        debug!(target: "processor",
+               "cleaning up caches");
+
+        if create_cleanup.caches_join.join().is_err() {
+            error!(target: "processor",
+                   "error shutting down name chache threads")
+        }
+    }
+
+    fn shutdown_err(
+        create: Self::CreateCleanup,
+        _run: Self::RunErrorCleanup
+    ) {
+        let StandaloneProcessorCreateCleanup { caches_join, .. } = create;
+
+        if let Err(_) = caches_join.join() {
+            error!(target: "processor",
+                   "error joining caches");
+        }
     }
 }

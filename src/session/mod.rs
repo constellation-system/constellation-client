@@ -44,15 +44,16 @@ pub trait MulticastClientSession<Prin, Recv, Msgs>: Sized {
         I: Iterator<Item = (MulticastStreamIdx, Prin)>;
 }
 
-pub trait UnicastClientSession<Recv, Msgs, Args>: Sized {
+pub trait UnicastClientSession<Recv, Msgs>: Sized {
     type Config;
+    type Param;
     type CreateError: Debug + Display;
-    type StartError: Display;
+    type StartError: Debug + Display;
     type Cleanup: ClientSessionCleanup;
 
     fn create(
         config: Self::Config,
-        args: Args
+        param: Self::Param
     ) -> Result<(Self, Recv, Msgs), Self::CreateError>;
 
     fn start(self) -> Result<Self::Cleanup, Self::StartError>;

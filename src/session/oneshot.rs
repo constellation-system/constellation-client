@@ -34,8 +34,6 @@ use clap::Command;
 use constellation_auth::authn::AuthNMsgRecv;
 use constellation_auth::authn::AuthNedDestruct;
 #[cfg(feature = "standalone")]
-use constellation_channels::resolve::cache::NSNameCachesCtx;
-#[cfg(feature = "standalone")]
 use constellation_channels::resolve::cache::ThreadedNSNameCaches;
 use constellation_common::codec::Encoder;
 use constellation_common::config::Create;
@@ -87,9 +85,11 @@ use crate::component::multicast::MulticastClientComponent;
 use crate::component::multicast::MulticastClientComponentTypes;
 #[cfg(feature = "standalone")]
 use crate::component::multicast::MulticastClientParam;
+#[cfg(feature = "standalone")]
+use crate::component::multicast::SimpleMulticastClientComponentTypes;
 use crate::session::MulticastClientSession;
 #[cfg(feature = "standalone")]
-use crate::component::multicast::SimpleMulticastComponentTypes;
+use crate::standalone::StandaloneCtx;
 
 pub trait OneShot<RoundID, Req, Eff, Seal>: Create
 where RoundID: Clone + From<u128> + Into<u128> {
@@ -436,23 +436,16 @@ where Create: Display,
     }
 }
 
-
 #[cfg(feature = "standalone")]
-pub struct StandaloneCreateCleanup {
+pub struct StandaloneOneShotCreateCleanup {
     shutdown: ShutdownFlag,
     caches_join: JoinHandle<()>
 }
 
 #[cfg(feature = "standalone")]
-pub struct StandaloneRunCleanup {
+pub struct StandaloneOneShotRunCleanup {
     shutdown: ShutdownFlag,
     caches_join: JoinHandle<()>,
-
-}
-
-#[cfg(feature = "standalone")]
-pub struct StandaloneCtx {
-    caches: ThreadedNSNameCaches,
 }
 
 #[cfg(feature = "standalone")]
@@ -468,23 +461,12 @@ where
 
 #[cfg(feature = "standalone")]
 type StandaloneMulticastClientComponentTypes<ClientTypes, BusTypes, App> =
-    SimpleMulticastComponentTypes<
+    SimpleMulticastClientComponentTypes<
         ClientTypes,
         BusTypes,
         OneShotSession<ClientTypes, App>,
         StandaloneCtx
     >;
-
-#[cfg(feature = "standalone")]
-impl NSNameCachesCtx for StandaloneCtx {
-    /// Exact type of name caches.
-    type NameCaches = ThreadedNSNameCaches;
-
-    #[inline]
-    fn name_caches(&mut self) -> &mut Self::NameCaches {
-        &mut self.caches
-    }
-}
 
 #[cfg(feature = "standalone")]
 impl<ClientTypes, Types, App> Standalone
@@ -519,7 +501,7 @@ where
         Types::EpochsConfig,
         Types::MsgAuthConfig
     >;
-    type CreateCleanup = StandaloneCreateCleanup;
+    type CreateCleanup = StandaloneOneShotCreateCleanup;
 
     const CONFIG_FILES: &[&str] = App::CONFIG_FILES;
     const NAME: &str = App::NAME;
@@ -529,6 +511,7 @@ where
         Some(VersionSuffix::Development)
     );
 
+    #[inline]
     fn cmdargs(cmd: Command) -> Command {
         App::cmdargs(cmd)
     }
@@ -544,7 +527,7 @@ where
         let ctx = StandaloneCtx {
             caches: caches
         };
-        let cleanup = StandaloneCreateCleanup {
+        let cleanup = StandaloneOneShotCreateCleanup {
             shutdown: shutdown.clone(),
             caches_join: caches_join
         };
@@ -589,7 +572,7 @@ where
     App: OneShot<ClientTypes::RoundID, ClientTypes::Payload,
                  ClientTypes::Effect, ClientTypes::Seal>,
     App::Config: for<'a> Deserialize<'a> + Serialize {
-    type RunErrorCleanup = ();
+    type RunErrorCleanup = StandaloneOneShotRunCleanup;
 
     fn run(self) -> Result<(), Self::RunErrorCleanup> {
         info!(target: "one-shot",
@@ -599,8 +582,6 @@ where
             error!(target: "one-shot",
                        "error starting component: {}",
                        err);
-
-            ()
         })?;
 
         cleanup.cleanup();
@@ -614,7 +595,7 @@ where
         create: Self::CreateCleanup,
         _run: Self::RunErrorCleanup
     ) {
-        let StandaloneCreateCleanup { caches_join, .. } = create;
+        let StandaloneOneShotCreateCleanup { caches_join, .. } = create;
 
         if let Err(_) = caches_join.join() {
             error!(target: "one-shot",

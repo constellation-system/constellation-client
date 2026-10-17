@@ -90,6 +90,69 @@ pub struct OneShotConfig<App> {
     resubmit: Retry
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename = "processor-client")]
+#[serde(rename_all = "kebab-case")]
+pub struct ProcessorClientConfig<
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+> where
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default {
+    /// Name cache configuration.
+    #[serde(default)]
+    name_caches: ThreadedNSNameCachesConfig,
+    #[serde(flatten)]
+    client: UnicastClientConfig<
+        ProcessorConfig<Session>,
+        Seal,
+        Payload,
+        Effect,
+        Res,
+        Err,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename = "processor")]
+#[serde(rename_all = "kebab-case")]
+pub struct ProcessorConfig<Proc> {
+    #[serde(flatten)]
+    proc: Proc,
+    #[serde(default)]
+    resubmit: Retry
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename = "multicast-client")]
@@ -547,5 +610,125 @@ impl<App> OneShotConfig<App> {
         self
     ) -> (App, Retry) {
         (self.app, self.resubmit)
+    }
+}
+
+
+impl<
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+>
+    ProcessorClientConfig<
+        Session,
+        Seal,
+        Payload,
+        Effect,
+        Res,
+        Err,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >
+where
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default
+{
+    #[inline]
+    pub fn new(
+        name_caches: ThreadedNSNameCachesConfig,
+        client: UnicastClientConfig<
+            ProcessorConfig<Session>,
+            Seal,
+            Payload,
+            Effect,
+            Res,
+            Err,
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            IDs,
+            Resolver,
+            Epochs,
+            MsgAuthN
+        >
+    ) -> Self {
+        ProcessorClientConfig {
+            client: client,
+            name_caches: name_caches,
+        }
+    }
+
+    #[inline]
+    pub fn take(
+        self
+    ) -> (
+        ThreadedNSNameCachesConfig,
+        UnicastClientConfig<
+            ProcessorConfig<Session>,
+            Seal,
+            Payload,
+            Effect,
+            Res,
+            Err,
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            IDs,
+            Resolver,
+            Epochs,
+            MsgAuthN
+        >
+    ) {
+        (self.name_caches, self.client)
+    }
+}
+
+impl<Proc> ProcessorConfig<Proc> {
+    #[inline]
+    pub fn new(
+        proc: Proc,
+        resubmit: Retry,
+    ) -> Self {
+        ProcessorConfig {
+            proc: proc,
+            resubmit: resubmit,
+        }
+    }
+
+    #[inline]
+    pub fn take(self) -> (Proc, Retry) {
+        (self.proc, self.resubmit)
     }
 }
