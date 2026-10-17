@@ -24,15 +24,16 @@ use constellation_streams::multicast::MulticastStreamIdx;
 pub mod oneshot;
 pub mod processor;
 
-pub trait MulticastClientSession<Prin, Recv, Msgs, Args>: Sized {
+pub trait MulticastClientSession<Prin, Recv, Msgs>: Sized {
     type Config;
+    type Param;
     type CreateError: Debug + Display;
     type StartError: Debug + Display;
     type Cleanup: ClientSessionCleanup;
 
     fn create(
         config: Self::Config,
-        args: Args
+        param: Self::Param
     ) -> Result<(Self, Recv, Msgs), Self::CreateError>;
 
     fn start<I>(

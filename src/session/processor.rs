@@ -144,8 +144,8 @@ pub struct ProcessorArgs {
 
 pub struct ProcessorSessionCleanup;
 
-pub type ProcessorCleanup<Types> =
-    UnicastClientComponentCleanup<Types>;
+pub type ProcessorCleanup<ClientTypes, Types> =
+    UnicastClientComponentCleanup<ClientTypes, Types>;
 
 pub enum ProcessorSessionError {
     SkippedIdx

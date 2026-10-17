@@ -31,49 +31,51 @@ exclude = [
 ]
 
 [features]
-default = ["dtls", "gssapi", "log", "openssl", "socks5", "tls", "unix"]
+default = ["dtls", "gssapi", "log", "openssl", "socks5", "standalone", "tls", "unix"]
 dtls = ["constellation-channels/dtls"]
 gssapi = ["constellation-auth/gssapi",
           "constellation-channels/gssapi",
           "constellation-common/gssapi",
           "constellation-component-common/gssapi",
-          "constellation-standalone/gssapi",
+          "constellation-standalone?/gssapi",
           "constellation-streams/gssapi"]
 log = ["dep:log",
        "constellation-auth/log",
        "constellation-channels/log",
        "constellation-common/log",
        "constellation-component-common/log",
-       "constellation-standalone/log",
+       "constellation-standalone?/log",
        "constellation-streams/log"]
 openssl = ["constellation-auth/openssl",
            "constellation-channels/openssl",
            "constellation-common/openssl",
            "constellation-component-common/openssl",
-           "constellation-standalone/openssl",
+           "constellation-standalone?/openssl",
            "constellation-streams/openssl"]
 socks5 = ["constellation-channels/socks5",
           "constellation-component-common/socks5"]
+standalone = ["dep:constellation-standalone"]
 tls = ["constellation-channels/tls"]
 unix = ["constellation-auth/unix",
         "constellation-channels/unix",
         "constellation-common/unix",
         "constellation-component-common/unix",
-        "constellation-standalone/unix",
+        "constellation-standalone?/unix",
         "constellation-streams/unix"]
 
 [dependencies]
 clap = { version = "4.5", features = ["cargo","string"] }
-constellation-auth = { git = "https://github.com/constellation-system/constellation-auth.git", branch = "project/ioc", default-features = false }
-constellation-channels = { git = "https://github.com/constellation-system/constellation-channels.git", branch = "project/ioc", default-features = false }
-constellation-common = { git = "https://github.com/constellation-system/constellation-common.git", branch = "project/ioc", default-features = false }
-constellation-component-common = { git = "https://github.com/constellation-system/constellation-component-common.git", branch = "project/ioc", default-features = false }
-constellation-streams = { git = "https://github.com/constellation-system/constellation-streams.git", branch = "project/ioc", default-features = false }
+constellation-auth = { path = "../constellation-auth/", default-features = false }
+constellation-channels = { path = "../constellation-channels/", default-features = false }
+constellation-common = { path = "../constellation-common/", default-features = false }
+constellation-component-common = { path = "../constellation-component-common/", default-features = false }
+constellation-standalone = { path = "../constellation-standalone/", default-features = false, optional = true }
+constellation-streams = { path = "../constellation-streams/", default-features = false }
 log = { version = "0.4", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 uuid = { version = "1.16", features = ["serde", "v5"] }
 
 [dev-dependencies]
-constellation-standalone = { git = "https://github.com/constellation-system/constellation-standalone.git", branch = "project/ioc", default-features = false }
 env_logger = { version = "0.10" }
+constellation-standalone = { path = "../constellation-standalone/", default-features = false }
 yaml_serde = { version = "0.10" }

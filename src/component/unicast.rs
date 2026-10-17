@@ -38,28 +38,31 @@ use constellation_component_common::xact::XactReqCodecCreateError;
 use constellation_component_common::xact::XactSealedCodecCreateError;
 use constellation_streams::large_obj::LargeObjProtoCreateError;
 use log::info;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::component::ClientComponentTypes;
 use crate::config::UnicastClientConfig;
 use crate::session::ClientSessionCleanup;
 use crate::session::UnicastClientSession;
 
-pub trait UnicastClientComponentTypes: ClientComponentTypes {
-    type IDsConfig: Default;
+pub trait UnicastClientComponentTypes<Types>
+where Types: ClientComponentTypes {
+    type IDsConfig: Default + for<'a> Deserialize<'a> + Serialize;
     type IDsCreateError: Debug + Display;
-    type ResolverConfig: Default;
-    type EpochsConfig: Default;
-    type SessionAuthConfig;
-    type MsgAuthConfig;
-    type LargeObjMsgAuthConfig;
-    type UnixConfig: Default;
-    type UDPConfig: Default;
+    type ResolverConfig: Default + for<'a> Deserialize<'a> + Serialize;
+    type EpochsConfig: Default + for<'a> Deserialize<'a> + Serialize;
+    type SessionAuthConfig: for<'a> Deserialize<'a> + Serialize;
+    type MsgAuthConfig: for<'a> Deserialize<'a> + Serialize;
+    type LargeObjMsgAuthConfig: for<'a> Deserialize<'a> + Serialize;
+    type UnixConfig: Default + for<'a> Deserialize<'a> + Serialize;
+    type UDPConfig: Default + for<'a> Deserialize<'a> + Serialize;
     type MsgAuthCreateError: Debug + Display;
     type Msgs: 'static + Send;
-    type Recv: 'static + AuthNMsgRecv<Self::MsgPrin, Self::AuthNMsg> + Send;
+    type Recv: 'static + AuthNMsgRecv<Types::MsgPrin, Types::AuthNMsg> + Send;
     type Ctx: 'static + NSNameCachesCtx + Send;
     type SessionArgs;
-    type SessionConfig;
+    type SessionConfig: for<'a> Deserialize<'a> + Serialize;
     type SessionCleanup: ClientSessionCleanup;
     type SessionCreateError: Debug + Display;
     type SessionStartError: Debug + Display;
@@ -75,80 +78,80 @@ pub trait UnicastClientComponentTypes: ClientComponentTypes {
     type BusTypes: UnicastLargeObjBusTypes<
             Self::Ctx,
             InMsg = XactHashBatch<
-                Self::RoundID,
-                Self::HashID,
-                Self::Seal,
-                Self::Payload,
-                Self::Effect,
-                Self::Result,
-                Self::Error
+                Types::RoundID,
+                Types::HashID,
+                Types::Seal,
+                Types::Payload,
+                Types::Effect,
+                Types::Result,
+                Types::Error
             >,
-            MsgPrin = Self::MsgPrin,
-            AuthNMsg = Self::AuthNMsg,
+            MsgPrin = Types::MsgPrin,
+            AuthNMsg = Types::AuthNMsg,
             Msgs = Self::Msgs,
             Recv = Self::Recv,
             EpochsConfig = Self::EpochsConfig,
             UnixConfig = Self::UnixConfig,
             UDPConfig = Self::UDPConfig,
-            HashConfig = Self::HashConfig,
-            HashCreateError = Self::HashCreateError,
+            HashConfig = Types::HashConfig,
+            HashCreateError = Types::HashCreateError,
             ResolverConfig = Self::ResolverConfig,
             SessionAuthConfig = Self::SessionAuthConfig,
             LargeObjMsgAuthConfig = Self::LargeObjMsgAuthConfig,
             MsgAuthConfig = Self::MsgAuthConfig,
             MsgAuthCreateError = Self::MsgAuthCreateError,
             DecoderConfig = XactBatchCodecConfig<
-                Self::SealCodecConfig,
-                Self::PayloadCodecConfig,
-                Self::EffectCodecConfig,
-                Self::ResultCodecConfig,
-                Self::ErrorCodecConfig
+                Types::SealCodecConfig,
+                Types::PayloadCodecConfig,
+                Types::EffectCodecConfig,
+                Types::ResultCodecConfig,
+                Types::ErrorCodecConfig
             >,
             DecoderCreateError = XactBatchCodecCreateError<
                 XactSealedCodecCreateError<
-                    Self::SealCodecCreateError,
+                    Types::SealCodecCreateError,
                     XactReqCodecCreateError<
-                        Self::PayloadCodecCreateError,
-                        Self::EffectCodecCreateError
+                        Types::PayloadCodecCreateError,
+                        Types::EffectCodecCreateError
                     >
                 >,
                 XactCommittedRoundCodecCreateError<
-                    Self::SealCodecCreateError,
+                    Types::SealCodecCreateError,
                     XactReqCodecCreateError<
-                        Self::PayloadCodecCreateError,
-                        Self::EffectCodecCreateError
+                        Types::PayloadCodecCreateError,
+                        Types::EffectCodecCreateError
                     >
                 >,
                 XactNotifyCodecCreateError<
-                    Self::ResultCodecCreateError,
-                    Self::ErrorCodecCreateError
+                    Types::ResultCodecCreateError,
+                    Types::ErrorCodecCreateError
                 >
             >,
             EncoderConfig = XactBatchCodecConfig<
-                Self::SealCodecConfig,
-                Self::PayloadCodecConfig,
-                Self::EffectCodecConfig,
-                Self::ResultCodecConfig,
-                Self::ErrorCodecConfig
+                Types::SealCodecConfig,
+                Types::PayloadCodecConfig,
+                Types::EffectCodecConfig,
+                Types::ResultCodecConfig,
+                Types::ErrorCodecConfig
             >,
             EncoderCreateError = XactBatchCodecCreateError<
                 XactSealedCodecCreateError<
-                    Self::SealCodecCreateError,
+                    Types::SealCodecCreateError,
                     XactReqCodecCreateError<
-                        Self::PayloadCodecCreateError,
-                        Self::EffectCodecCreateError
+                        Types::PayloadCodecCreateError,
+                        Types::EffectCodecCreateError
                     >
                 >,
                 XactCommittedRoundCodecCreateError<
-                    Self::SealCodecCreateError,
+                    Types::SealCodecCreateError,
                     XactReqCodecCreateError<
-                        Self::PayloadCodecCreateError,
-                        Self::EffectCodecCreateError
+                        Types::PayloadCodecCreateError,
+                        Types::EffectCodecCreateError
                     >
                 >,
                 XactNotifyCodecCreateError<
-                    Self::ResultCodecCreateError,
-                    Self::ErrorCodecCreateError
+                    Types::ResultCodecCreateError,
+                    Types::ErrorCodecCreateError
                 >
             >,
             IDsConfig = Self::IDsConfig,
@@ -156,28 +159,29 @@ pub trait UnicastClientComponentTypes: ClientComponentTypes {
         > + Send;
 }
 
-pub struct UnicastClientComponent<Types>
+pub struct UnicastClientComponent<ClientTypes, Types>
 where
-    Types: UnicastClientComponentTypes {
+    ClientTypes: ClientComponentTypes,
+    Types: UnicastClientComponentTypes<ClientTypes> {
     config: UnicastLargeObjBusConfig<
-        Types::HashConfig,
+        ClientTypes::HashConfig,
         Types::SessionAuthConfig,
         Types::LargeObjMsgAuthConfig,
         Types::UnixConfig,
         Types::UDPConfig,
         XactBatchCodecConfig<
-            Types::SealCodecConfig,
-            Types::PayloadCodecConfig,
-            Types::EffectCodecConfig,
-            Types::ResultCodecConfig,
-            Types::ErrorCodecConfig
+            ClientTypes::SealCodecConfig,
+            ClientTypes::PayloadCodecConfig,
+            ClientTypes::EffectCodecConfig,
+            ClientTypes::ResultCodecConfig,
+            ClientTypes::ErrorCodecConfig
         >,
         XactBatchCodecConfig<
-            Types::SealCodecConfig,
-            Types::PayloadCodecConfig,
-            Types::EffectCodecConfig,
-            Types::ResultCodecConfig,
-            Types::ErrorCodecConfig
+            ClientTypes::SealCodecConfig,
+            ClientTypes::PayloadCodecConfig,
+            ClientTypes::EffectCodecConfig,
+            ClientTypes::ResultCodecConfig,
+            ClientTypes::ErrorCodecConfig
         >,
         Types::IDsConfig,
         Types::ResolverConfig,
@@ -189,9 +193,10 @@ where
     ctx: Types::Ctx
 }
 
-pub struct UnicastClientComponentCleanup<Types>
+pub struct UnicastClientComponentCleanup<ClientTypes, Types>
 where
-    Types: UnicastClientComponentTypes {
+    ClientTypes: ClientComponentTypes,
+    Types: UnicastClientComponentTypes<ClientTypes> {
     unicast: UnicastLargeObjBus<Types::BusTypes, Types::Ctx>,
     session: Types::SessionCleanup
 }
@@ -223,19 +228,21 @@ impl<Ctx, Args> UnicastClientParam<Ctx, Args> {
     }
 }
 
-impl<Types> CreateWithParam<UnicastClientParam<Types::Ctx, Types::SessionArgs>>
-    for UnicastClientComponent<Types>
+impl<ClientTypes, Types>
+    CreateWithParam<UnicastClientParam<Types::Ctx, Types::SessionArgs>>
+    for UnicastClientComponent<ClientTypes, Types>
 where
-    Types: UnicastClientComponentTypes
+    ClientTypes: ClientComponentTypes,
+    Types: UnicastClientComponentTypes<ClientTypes>
 {
     type Config = UnicastClientConfig<
         Types::SessionConfig,
-        Types::SealCodecConfig,
-        Types::PayloadCodecConfig,
-        Types::EffectCodecConfig,
-        Types::ResultCodecConfig,
-        Types::ErrorCodecConfig,
-        Types::HashConfig,
+        ClientTypes::SealCodecConfig,
+        ClientTypes::PayloadCodecConfig,
+        ClientTypes::EffectCodecConfig,
+        ClientTypes::ResultCodecConfig,
+        ClientTypes::ErrorCodecConfig,
+        ClientTypes::HashConfig,
         Types::SessionAuthConfig,
         Types::LargeObjMsgAuthConfig,
         Types::UnixConfig,
@@ -250,12 +257,12 @@ where
     fn create(
         config: UnicastClientConfig<
             Types::SessionConfig,
-            Types::SealCodecConfig,
-            Types::PayloadCodecConfig,
-            Types::EffectCodecConfig,
-            Types::ResultCodecConfig,
-            Types::ErrorCodecConfig,
-            Types::HashConfig,
+            ClientTypes::SealCodecConfig,
+            ClientTypes::PayloadCodecConfig,
+            ClientTypes::EffectCodecConfig,
+            ClientTypes::ResultCodecConfig,
+            ClientTypes::ErrorCodecConfig,
+            ClientTypes::HashConfig,
             Types::SessionAuthConfig,
             Types::LargeObjMsgAuthConfig,
             Types::UnixConfig,
@@ -279,58 +286,59 @@ where
     }
 }
 
-impl<Types> UnicastClientComponent<Types>
+impl<ClientTypes, Types> UnicastClientComponent<ClientTypes, Types>
 where
-    Types: 'static + UnicastClientComponentTypes
+    ClientTypes: 'static + ClientComponentTypes,
+    Types: 'static + UnicastClientComponentTypes<ClientTypes>
 {
     pub fn start(
         self
     ) -> Result<
-        UnicastClientComponentCleanup<Types>,
+        UnicastClientComponentCleanup<ClientTypes, Types>,
         UnicastClientComponentRunError<
             Types::SessionCreateError,
             UnicastLargeObjBusCreateError<
-                Types::HashCreateError,
+                ClientTypes::HashCreateError,
                 Types::MsgAuthCreateError,
                 LargeObjProtoCreateError<
                     XactBatchCodecCreateError<
                         XactSealedCodecCreateError<
-                            Types::SealCodecCreateError,
+                            ClientTypes::SealCodecCreateError,
                             XactReqCodecCreateError<
-                                Types::PayloadCodecCreateError,
-                                Types::EffectCodecCreateError
+                                ClientTypes::PayloadCodecCreateError,
+                                ClientTypes::EffectCodecCreateError
                             >
                         >,
                         XactCommittedRoundCodecCreateError<
-                            Types::SealCodecCreateError,
+                            ClientTypes::SealCodecCreateError,
                             XactReqCodecCreateError<
-                                Types::PayloadCodecCreateError,
-                                Types::EffectCodecCreateError
+                                ClientTypes::PayloadCodecCreateError,
+                                ClientTypes::EffectCodecCreateError
                             >
                         >,
                         XactNotifyCodecCreateError<
-                            Types::ResultCodecCreateError,
-                            Types::ErrorCodecCreateError
+                            ClientTypes::ResultCodecCreateError,
+                            ClientTypes::ErrorCodecCreateError
                         >
                     >,
                     XactBatchCodecCreateError<
                         XactSealedCodecCreateError<
-                            Types::SealCodecCreateError,
+                            ClientTypes::SealCodecCreateError,
                             XactReqCodecCreateError<
-                                Types::PayloadCodecCreateError,
-                                Types::EffectCodecCreateError
+                                ClientTypes::PayloadCodecCreateError,
+                                ClientTypes::EffectCodecCreateError
                             >
                         >,
                         XactCommittedRoundCodecCreateError<
-                            Types::SealCodecCreateError,
+                            ClientTypes::SealCodecCreateError,
                             XactReqCodecCreateError<
-                                Types::PayloadCodecCreateError,
-                                Types::EffectCodecCreateError
+                                ClientTypes::PayloadCodecCreateError,
+                                ClientTypes::EffectCodecCreateError
                             >
                         >,
                         XactNotifyCodecCreateError<
-                            Types::ResultCodecCreateError,
-                            Types::ErrorCodecCreateError
+                            ClientTypes::ResultCodecCreateError,
+                            ClientTypes::ErrorCodecCreateError
                         >
                     >,
                     Types::IDsCreateError
@@ -368,9 +376,10 @@ where
     }
 }
 
-impl<Types> UnicastClientComponentCleanup<Types>
+impl<ClientTypes, Types> UnicastClientComponentCleanup<ClientTypes, Types>
 where
-    Types: 'static + UnicastClientComponentTypes
+    ClientTypes: 'static + ClientComponentTypes,
+    Types: 'static + UnicastClientComponentTypes<ClientTypes>
 {
     pub fn cleanup(self) {
         let UnicastClientComponentCleanup { unicast, session } = self;

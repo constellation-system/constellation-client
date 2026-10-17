@@ -23,23 +23,45 @@ use std::fmt::Formatter;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::Mutex;
+#[cfg(feature = "standalone")]
+use std::thread::JoinHandle;
 use std::time::Instant;
 
+#[cfg(feature = "standalone")]
+use clap::ArgMatches;
+#[cfg(feature = "standalone")]
+use clap::Command;
 use constellation_auth::authn::AuthNMsgRecv;
 use constellation_auth::authn::AuthNedDestruct;
+#[cfg(feature = "standalone")]
+use constellation_channels::resolve::cache::NSNameCachesCtx;
+#[cfg(feature = "standalone")]
+use constellation_channels::resolve::cache::ThreadedNSNameCaches;
 use constellation_common::codec::Encoder;
 use constellation_common::config::Create;
+#[cfg(feature = "standalone")]
+use constellation_common::config::CreateWithParam;
 use constellation_common::error::MutexPoison;
 use constellation_common::error::ScopedError;
 use constellation_common::error::WithMutexPoison;
 use constellation_common::retry::Retry;
+#[cfg(feature = "standalone")]
+use constellation_common::shutdown::ShutdownFlag;
 use constellation_common::sync::Notify;
+#[cfg(feature = "standalone")]
+use constellation_common::version::FullVersion;
 use constellation_common::version::Version;
+#[cfg(feature = "standalone")]
+use constellation_common::version::VersionSuffix;
 use constellation_component_common::xact::XactBatch;
 use constellation_component_common::xact::XactEffects;
 use constellation_component_common::xact::XactNotifyState;
 use constellation_component_common::xact::XactSealed;
 use constellation_component_common::xact::XactUncommittedReq;
+#[cfg(feature = "standalone")]
+use constellation_standalone::Standalone;
+#[cfg(feature = "standalone")]
+use constellation_standalone::StandaloneApp;
 use constellation_streams::frags::Frags;
 use constellation_streams::large_obj::LargeObjProtoAddOutboundError;
 use constellation_streams::large_obj::LargeObjMsgs;
@@ -47,31 +69,57 @@ use constellation_streams::large_obj::LargeObjSender;
 use constellation_streams::multicast::MulticastStreamIdx;
 use constellation_streams::threads::poll::MsgsSetNotify;
 use log::debug;
+#[cfg(feature = "standalone")]
+use log::error;
 use log::info;
 use log::warn;
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
 
-use crate::component::ClientComponentTypes;
-use crate::component::multicast::MulticastClientComponentTypes;
-use crate::session::MulticastClientSession;
 use crate::session::ClientSessionCleanup;
+#[cfg(feature = "standalone")]
+use crate::config::OneShotClientConfig;
+use crate::config::OneShotConfig;
+use crate::component::ClientComponentTypes;
+#[cfg(feature = "standalone")]
+use crate::component::multicast::MulticastClientComponent;
+use crate::component::multicast::MulticastClientComponentTypes;
+#[cfg(feature = "standalone")]
+use crate::component::multicast::MulticastClientParam;
+use crate::session::MulticastClientSession;
+#[cfg(feature = "standalone")]
+use crate::component::multicast::SimpleMulticastComponentTypes;
 
 pub trait OneShot<RoundID, Req, Eff, Seal>: Create
 where RoundID: Clone + From<u128> + Into<u128> {
-    const SERVICE_NAME: &str;
+    const NAME: &str;
+    #[cfg(feature = "standalone")]
+    const CONFIG_FILES: &[&str];
 
-    type Arg;
+    type Param;
+    type GetArgError: Debug + Display;
     type CreateSealError: Debug + Display;
 
     fn get_msg(
         &self,
-        arg: Self::Arg
+        param: Self::Param
     ) -> (Uuid, Version, u64, Req, XactEffects<RoundID, Eff>);
 
     fn create_seal(
         &self,
         req: &XactUncommittedReq<RoundID, Req, Eff>
     ) -> Result<Seal, Self::CreateSealError>;
+
+    #[cfg(feature = "standalone")]
+    fn get_arg(
+        args: ArgMatches
+    ) -> Result<Self::Param, Self::GetArgError>;
+
+    #[cfg(feature = "standalone")]
+    fn cmdargs(cmd: Command) -> Command {
+        cmd
+    }
 }
 
 struct OneShotMsg<RoundID, Payload, Effect, Seal>
@@ -84,11 +132,11 @@ where RoundID: Clone + From<u128> + Into<u128> {
     when: Instant
 }
 
-pub struct OneShotSession<Types, OS>
-where Types: MulticastClientComponentTypes,
-      OS: OneShot<Types::RoundID, Types::Payload, Types::Effect, Types::Seal> {
+pub struct OneShotSession<Types, App>
+where Types: ClientComponentTypes,
+      App: OneShot<Types::RoundID, Types::Payload, Types::Effect, Types::Seal> {
     types: PhantomData<Types>,
-    os: PhantomData<OS>
+    os: PhantomData<App>
 }
 
 pub struct OneShotState<Types>
@@ -109,11 +157,6 @@ where Types: ClientComponentTypes {
 pub struct OneShotSessionRecv<Types>
 where Types: ClientComponentTypes {
     state: Arc<OneShotState<Types>>,
-}
-
-pub struct OneShotArgs<Arg> {
-    arg: Arg,
-    resubmit: Retry,
 }
 
 pub struct OneShotSessionCleanup;
@@ -149,7 +192,7 @@ where Types: ClientComponentTypes {
             let now = Instant::now();
 
             if now >= msg.when {
-                debug!(target: "cmdline-msgs",
+                debug!(target: "one-shot-msgs",
                        "generating outgoing batch");
 
                 let sealed = msg.msg.clone();
@@ -281,12 +324,12 @@ where Types: ClientComponentTypes {
         let (_, msg) = msg.take();
 
         for _ in msg.uncommitted() {
-            warn!(target: "cmdline-recv",
+            warn!(target: "one-shot-recv",
                   "discarding uncommitted request")
         }
 
         for _ in msg.committed() {
-            warn!(target: "cmdline-recv",
+            warn!(target: "one-shot-recv",
                   "discarding committed round")
         }
 
@@ -301,7 +344,7 @@ where Types: ClientComponentTypes {
                 }
             }
 
-            info!(target: "cmdline-recv",
+            info!(target: "one-shot-recv",
                   "notification for {}: {}",
                   notify.hash(), notify.state())
         }
@@ -314,31 +357,31 @@ impl ClientSessionCleanup for OneShotSessionCleanup {
     fn cleanup(self) {}
 }
 
-impl<Types, OS> MulticastClientSession<Types::SessionPrin,
-                                   OneShotSessionRecv<Types>,
-                                   OneShotSessionMsgs<Types>,
-                                   OneShotArgs<OS::Arg>>
-    for OneShotSession<Types, OS>
-where Types: MulticastClientComponentTypes,
-      OS: OneShot<Types::RoundID, Types::Payload, Types::Effect, Types::Seal> {
+impl<Types, Prin, App> MulticastClientSession<Prin,
+                                              OneShotSessionRecv<Types>,
+                                              OneShotSessionMsgs<Types>>
+    for OneShotSession<Types, App>
+where Types: ClientComponentTypes,
+      App: OneShot<Types::RoundID, Types::Payload, Types::Effect, Types::Seal> {
     type Cleanup = OneShotSessionCleanup;
-    type Config = OS::Config;
-    type CreateError = OneShotError<OS::CreateError, OS::CreateSealError>;
+    type Config = OneShotConfig<App::Config>;
+    type CreateError = OneShotError<App::CreateError, App::CreateSealError>;
     type StartError = MutexPoison;
+    type Param = App::Param;
 
     fn create(
         config: Self::Config,
-        args: OneShotArgs<OS::Arg>
+        param: App::Param
     ) -> Result<
             (Self,
              OneShotSessionRecv<Types>,
              OneShotSessionMsgs<Types>),
         Self::CreateError
     > {
-        let OneShotArgs { arg, resubmit } = args;
-        let os = OS::create(config)
+        let (app_config, resubmit) = config.take();
+        let os = App::create(app_config)
             .map_err(|err| OneShotError::Create { err: err })?;
-        let (uuid, version, instance, payload, effects) = os.get_msg(arg);
+        let (uuid, version, instance, payload, effects) = os.get_msg(param);
         let req = XactUncommittedReq::new(uuid, version, instance,
                                           payload, effects);
         let seal = os.create_seal(&req)
@@ -366,7 +409,6 @@ where Types: MulticastClientComponentTypes,
         };
 
         Ok((out, recv, msgs))
-
     }
 
     fn start<I>(
@@ -374,7 +416,7 @@ where Types: MulticastClientComponentTypes,
         _parties: I
     ) -> Result<Self::Cleanup, Self::StartError>
     where
-        I: Iterator<Item = (MulticastStreamIdx, Types::SessionPrin)> {
+        I: Iterator<Item = (MulticastStreamIdx, Prin)> {
         Ok(OneShotSessionCleanup)
     }
 }
@@ -390,6 +432,193 @@ where Create: Display,
         match self {
             OneShotError::Create { err } => err.fmt(f),
             OneShotError::Seal { err } => err.fmt(f),
+        }
+    }
+}
+
+
+#[cfg(feature = "standalone")]
+pub struct StandaloneCreateCleanup {
+    shutdown: ShutdownFlag,
+    caches_join: JoinHandle<()>
+}
+
+#[cfg(feature = "standalone")]
+pub struct StandaloneRunCleanup {
+    shutdown: ShutdownFlag,
+    caches_join: JoinHandle<()>,
+
+}
+
+#[cfg(feature = "standalone")]
+pub struct StandaloneCtx {
+    caches: ThreadedNSNameCaches,
+}
+
+#[cfg(feature = "standalone")]
+pub struct StandaloneOneShot<ClientTypes, Types, App>
+where
+    ClientTypes: ClientComponentTypes,
+    Types: MulticastClientComponentTypes<ClientTypes>,
+    App: OneShot<ClientTypes::RoundID, ClientTypes::Payload,
+                 ClientTypes::Effect, ClientTypes::Seal> {
+    app: PhantomData<App>,
+    component: MulticastClientComponent<ClientTypes, Types>
+}
+
+#[cfg(feature = "standalone")]
+type StandaloneMulticastClientComponentTypes<ClientTypes, BusTypes, App> =
+    SimpleMulticastComponentTypes<
+        ClientTypes,
+        BusTypes,
+        OneShotSession<ClientTypes, App>,
+        StandaloneCtx
+    >;
+
+#[cfg(feature = "standalone")]
+impl NSNameCachesCtx for StandaloneCtx {
+    /// Exact type of name caches.
+    type NameCaches = ThreadedNSNameCaches;
+
+    #[inline]
+    fn name_caches(&mut self) -> &mut Self::NameCaches {
+        &mut self.caches
+    }
+}
+
+#[cfg(feature = "standalone")]
+impl<ClientTypes, Types, App> Standalone
+    for StandaloneOneShot<ClientTypes, Types, App>
+where
+    ClientTypes: ClientComponentTypes,
+    Types: MulticastClientComponentTypes<
+        ClientTypes,
+        Session = OneShotSession<ClientTypes, App>,
+        SessionParam = App::Param,
+        SessionConfig = OneShotConfig<App::Config>,
+        Ctx = StandaloneCtx
+    >,
+    App: OneShot<ClientTypes::RoundID, ClientTypes::Payload,
+                 ClientTypes::Effect, ClientTypes::Seal>,
+    App::Config: for<'a> Deserialize<'a> + Serialize {
+    type Config = OneShotClientConfig<
+        Types::SessionPrin,
+        App::Config,
+        ClientTypes::SealCodecConfig,
+        ClientTypes::PayloadCodecConfig,
+        ClientTypes::EffectCodecConfig,
+        ClientTypes::ResultCodecConfig,
+        ClientTypes::ErrorCodecConfig,
+        ClientTypes::HashConfig,
+        Types::SessionAuthConfig,
+        Types::LargeObjMsgAuthConfig,
+        Types::UnixConfig,
+        Types::UDPConfig,
+        Types::IDsConfig,
+        Types::ResolverConfig,
+        Types::EpochsConfig,
+        Types::MsgAuthConfig
+    >;
+    type CreateCleanup = StandaloneCreateCleanup;
+
+    const CONFIG_FILES: &[&str] = App::CONFIG_FILES;
+    const NAME: &str = App::NAME;
+    const VERSION: FullVersion = FullVersion::new(
+        None,
+        Version::new(0, 0, 0),
+        Some(VersionSuffix::Development)
+    );
+
+    fn cmdargs(cmd: Command) -> Command {
+        App::cmdargs(cmd)
+    }
+
+    fn create(
+        args: ArgMatches,
+        config: Self::Config
+    ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
+        let (name_caches_config, client_config) = config.take();
+        let shutdown = ShutdownFlag::new();
+        let (caches, caches_join) =
+            ThreadedNSNameCaches::create(name_caches_config, shutdown.clone());
+        let ctx = StandaloneCtx {
+            caches: caches
+        };
+        let cleanup = StandaloneCreateCleanup {
+            shutdown: shutdown.clone(),
+            caches_join: caches_join
+        };
+        let arg = App::get_arg(args)
+            .map_err(|err| {
+                error!(target: "one-shot-recv",
+                       "error parsing application args: {}",
+                       err);
+
+                cleanup
+            })?;
+        let param = MulticastClientParam::new(arg, ctx);
+        let component = MulticastClientComponent::create(client_config, param)
+            .map_err(|err| {
+                error!(target: "one-shot-standalone",
+                       "error creating multicast client: {}",
+                       err);
+
+                cleanup
+            })?;
+        let out = StandaloneOneShot {
+            app: PhantomData,
+            component: component
+        };
+
+        Ok((out, cleanup))
+    }
+}
+
+#[cfg(feature = "standalone")]
+impl<ClientTypes, Types, App> StandaloneApp
+    for StandaloneOneShot<ClientTypes, Types, App>
+where
+    ClientTypes: 'static + ClientComponentTypes,
+    Types: 'static + MulticastClientComponentTypes<
+        ClientTypes,
+        Session = OneShotSession<ClientTypes, App>,
+        SessionParam = App::Param,
+        SessionConfig = OneShotConfig<App::Config>,
+        Ctx = StandaloneCtx
+    >,
+    App: OneShot<ClientTypes::RoundID, ClientTypes::Payload,
+                 ClientTypes::Effect, ClientTypes::Seal>,
+    App::Config: for<'a> Deserialize<'a> + Serialize {
+    type RunErrorCleanup = ();
+
+    fn run(self) -> Result<(), Self::RunErrorCleanup> {
+        info!(target: "one-shot",
+              "starting one-shot component");
+
+        let cleanup = self.component.start().map_err(|err| {
+            error!(target: "one-shot",
+                       "error starting component: {}",
+                       err);
+
+            ()
+        })?;
+
+        cleanup.cleanup();
+
+        Ok(())
+    }
+
+    fn cleanup(_create: Self::CreateCleanup) {}
+
+    fn cleanup_err(
+        create: Self::CreateCleanup,
+        _run: Self::RunErrorCleanup
+    ) {
+        let StandaloneCreateCleanup { caches_join, .. } = create;
+
+        if let Err(_) = caches_join.join() {
+            error!(target: "one-shot",
+                   "error joining caches");
         }
     }
 }
