@@ -37,8 +37,8 @@ use constellation_auth::authn::AuthNedDestruct;
 #[cfg(feature = "standalone")]
 use constellation_channels::resolve::cache::ThreadedNSNameCaches;
 use constellation_common::codec::Encoder;
-use constellation_common::config::CreateWithParam;
 use constellation_common::config::Create;
+use constellation_common::config::CreateWithParam;
 use constellation_common::error::MutexPoison;
 use constellation_common::error::ScopedError;
 use constellation_common::error::WithMutexPoison;
@@ -58,25 +58,25 @@ use constellation_component_common::xact::XactCommittedEffects;
 use constellation_component_common::xact::XactCommittedReq;
 use constellation_component_common::xact::XactCommittedRound;
 use constellation_component_common::xact::XactCommittedRoundCodecCreateError;
-use constellation_component_common::xact::XactHashBatch;
-use constellation_component_common::xact::XactHashBatchCodec;
 use constellation_component_common::xact::XactEffects;
 use constellation_component_common::xact::XactError;
+use constellation_component_common::xact::XactHashBatch;
+use constellation_component_common::xact::XactHashBatchCodec;
+use constellation_component_common::xact::XactLinPoint;
 use constellation_component_common::xact::XactNotify;
 use constellation_component_common::xact::XactNotifyCodecCreateError;
 use constellation_component_common::xact::XactNotifyState;
 use constellation_component_common::xact::XactReqCodecCreateError;
 use constellation_component_common::xact::XactSealed;
 use constellation_component_common::xact::XactSealedCodecCreateError;
-use constellation_component_common::xact::XactLinPoint;
 use constellation_component_common::xact::XactUncommittedHashReq;
 #[cfg(feature = "standalone")]
 use constellation_standalone::Standalone;
 #[cfg(feature = "standalone")]
 use constellation_standalone::StandaloneService;
 use constellation_streams::frags::Frags;
-use constellation_streams::large_obj::LargeObjProtoAddOutboundError;
 use constellation_streams::large_obj::LargeObjMsgs;
+use constellation_streams::large_obj::LargeObjProtoAddOutboundError;
 use constellation_streams::large_obj::LargeObjSender;
 use constellation_streams::threads::poll::MsgsSetNotify;
 use log::debug;
@@ -88,25 +88,26 @@ use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
+use crate::component::HashClientComponentTypes;
+#[cfg(feature = "standalone")]
+use crate::component::unicast::HashUnicastClientComponent;
+use crate::component::unicast::HashUnicastClientComponentCleanup;
+use crate::component::unicast::HashUnicastClientComponentTypes;
+#[cfg(feature = "standalone")]
+use crate::component::unicast::SimpleHashUnicastClientComponentTypes;
+#[cfg(feature = "standalone")]
+use crate::component::unicast::UnicastClientParam;
 #[cfg(feature = "standalone")]
 use crate::config::ProcessorClientConfig;
 use crate::config::ProcessorConfig;
-use crate::component::HashClientComponentTypes;
-#[cfg(feature = "standalone")]
-use crate::component::unicast::SimpleHashUnicastClientComponentTypes;
-use crate::component::unicast::HashUnicastClientComponentCleanup;
-#[cfg(feature = "standalone")]
-use crate::component::unicast::HashUnicastClientComponent;
-use crate::component::unicast::HashUnicastClientComponentTypes;
-#[cfg(feature = "standalone")]
-use crate::component::unicast::UnicastClientParam;
-use crate::session::UnicastClientSession;
 use crate::session::ClientSessionCleanup;
+use crate::session::UnicastClientSession;
 #[cfg(feature = "standalone")]
 use crate::standalone::StandaloneCtx;
 
 pub trait Processor<RoundID, Req, Eff, Res, Err>: Create
-where RoundID: Clone + From<u128> + Into<u128> {
+where
+    RoundID: Clone + From<u128> + Into<u128> {
     const SERVICE_ID: &str;
     const SERVICE_NAME: &str;
     #[cfg(feature = "standalone")]
@@ -128,38 +129,65 @@ where RoundID: Clone + From<u128> + Into<u128> {
 }
 
 pub struct ProcessorSession<Types, Proc>
-where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
-                      Types::Result, Types::Error>,
-      Types: HashClientComponentTypes {
+where
+    Proc: Processor<
+            Types::RoundID,
+            Types::Payload,
+            Types::Effect,
+            Types::Result,
+            Types::Error
+        >,
+    Types: HashClientComponentTypes {
     types: PhantomData<Types>,
     proc: PhantomData<Proc>
 }
 
 pub struct ProcessorNotifyState<RoundID, H, Res, Err>
-where RoundID: Clone + From<u128> + Into<u128>,
-      H: HashID {
+where
+    RoundID: Clone + From<u128> + Into<u128>,
+    H: HashID {
     msg: XactNotify<RoundID, H, Res, Err>,
     nretries: usize,
     when: Instant
 }
 
 pub struct ProcessorState<Types, Proc>
-where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
-                      Types::Result, Types::Error>,
-      Types: HashClientComponentTypes {
-    pending: Mutex<HashMap<Types::HashID,
-                           ProcessorNotifyState<Types::RoundID, Types::HashID,
-                                                Types::Result, Types::Error>>>,
+where
+    Proc: Processor<
+            Types::RoundID,
+            Types::Payload,
+            Types::Effect,
+            Types::Result,
+            Types::Error
+        >,
+    Types: HashClientComponentTypes {
+    pending: Mutex<
+        HashMap<
+            Types::HashID,
+            ProcessorNotifyState<
+                Types::RoundID,
+                Types::HashID,
+                Types::Result,
+                Types::Error
+            >
+        >
+    >,
     proc: Mutex<Proc>,
     notify: Mutex<Option<Notify>>,
-    resubmit: Retry,
+    resubmit: Retry
 }
 
 #[derive(Clone)]
 pub struct ProcessorSessionMsgs<Types, Proc>
-where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
-                      Types::Result, Types::Error>,
-      Types: HashClientComponentTypes {
+where
+    Proc: Processor<
+            Types::RoundID,
+            Types::Payload,
+            Types::Effect,
+            Types::Result,
+            Types::Error
+        >,
+    Types: HashClientComponentTypes {
     state: Arc<ProcessorState<Types, Proc>>,
     // XXX this is a hack; eventually, we'll send a registration
     // message of some kind.
@@ -168,17 +196,23 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
 
 #[derive(Clone)]
 pub struct ProcessorSessionRecv<Types, Proc>
-where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
-                      Types::Result, Types::Error>,
-      Types: HashClientComponentTypes {
+where
+    Proc: Processor<
+            Types::RoundID,
+            Types::Payload,
+            Types::Effect,
+            Types::Result,
+            Types::Error
+        >,
+    Types: HashClientComponentTypes {
     state: Arc<ProcessorState<Types, Proc>>,
     class: Uuid,
     version: Version,
-    when: XactLinPoint<Types::RoundID>,
+    when: XactLinPoint<Types::RoundID>
 }
 
 pub struct ProcessorParams {
-    resubmit: Retry,
+    resubmit: Retry
 }
 
 pub struct ProcessorSessionCleanup;
@@ -198,18 +232,17 @@ pub enum ProcessorRunError<Err> {
 }
 
 impl<RoundID, H, Res, Err> ProcessorNotifyState<RoundID, H, Res, Err>
-where RoundID: Clone + From<u128> + Into<u128>,
-      H: Clone + HashID,
-      Res: Clone,
-      Err: Clone {
+where
+    RoundID: Clone + From<u128> + Into<u128>,
+    H: Clone + HashID,
+    Res: Clone,
+    Err: Clone
+{
     fn get_notify(
         &mut self,
         resubmit: &Retry,
         now: Instant
-    ) -> (
-        Option<XactNotify<RoundID, H, Res, Err>>,
-        Instant
-    ) {
+    ) -> (Option<XactNotify<RoundID, H, Res, Err>>, Instant) {
         if self.when <= now {
             let duration = resubmit.retry_delay(self.nretries);
             let when = now + duration;
@@ -225,15 +258,28 @@ where RoundID: Clone + From<u128> + Into<u128>,
 }
 
 impl<Types, Proc> ProcessorState<Types, Proc>
-where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
-                      Types::Result, Types::Error>,
-      Types: HashClientComponentTypes {
+where
+    Proc: Processor<
+            Types::RoundID,
+            Types::Payload,
+            Types::Effect,
+            Types::Result,
+            Types::Error
+        >,
+    Types: HashClientComponentTypes
+{
     fn get_notifies(
         &self
     ) -> Result<
         (
-            Vec<XactNotify<Types::RoundID, Types::HashID,
-                           Types::Result, Types::Error>>,
+            Vec<
+                XactNotify<
+                    Types::RoundID,
+                    Types::HashID,
+                    Types::Result,
+                    Types::Error
+                >
+            >,
             Option<Instant>
         ),
         MutexPoison
@@ -259,8 +305,12 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
     fn add_notify(
         &self,
         hash: Types::HashID,
-        msg: XactNotify<Types::RoundID, Types::HashID,
-                        Types::Result, Types::Error>,
+        msg: XactNotify<
+            Types::RoundID,
+            Types::HashID,
+            Types::Result,
+            Types::Error
+        >
     ) -> Result<(), MutexPoison> {
         let mut guard = self.pending.lock().map_err(|_| MutexPoison)?;
 
@@ -294,9 +344,16 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
 }
 
 impl<Types, Proc> MsgsSetNotify for ProcessorSessionMsgs<Types, Proc>
-where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
-                      Types::Result, Types::Error>,
-      Types: HashClientComponentTypes {
+where
+    Proc: Processor<
+            Types::RoundID,
+            Types::Payload,
+            Types::Effect,
+            Types::Result,
+            Types::Error
+        >,
+    Types: HashClientComponentTypes
+{
     type Error = MutexPoison;
 
     fn set_notify(
@@ -309,21 +366,29 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
     }
 }
 
-impl<Types, Proc> LargeObjMsgs<
-    Types::Hash,
-    XactHashBatch<
-        Types::RoundID,
-        Types::HashID,
-        Types::Seal,
-        Types::Payload,
-        Types::Effect,
-        Types::Result,
-        Types::Error
-    >
-> for ProcessorSessionMsgs<Types, Proc>
-where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
-                      Types::Result, Types::Error>,
-      Types: HashClientComponentTypes {
+impl<Types, Proc>
+    LargeObjMsgs<
+        Types::Hash,
+        XactHashBatch<
+            Types::RoundID,
+            Types::HashID,
+            Types::Seal,
+            Types::Payload,
+            Types::Effect,
+            Types::Result,
+            Types::Error
+        >
+    > for ProcessorSessionMsgs<Types, Proc>
+where
+    Proc: Processor<
+            Types::RoundID,
+            Types::Payload,
+            Types::Effect,
+            Types::Result,
+            Types::Error
+        >,
+    Types: HashClientComponentTypes
+{
     type AddMsgsError<Encode>
         = WithMutexPoison<LargeObjProtoAddOutboundError<Encode>>
     where
@@ -347,16 +412,19 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
         >
     ) -> Result<Option<Instant>, Self::AddMsgsError<Enc::EncodeError>>
     where
-        Enc: Clone + Create
-            + Encoder<XactHashBatch<
-                Types::RoundID,
-                Types::HashID,
-                Types::Seal,
-                Types::Payload,
-                Types::Effect,
-                Types::Result,
-                Types::Error
-            >>,
+        Enc: Clone
+            + Create
+            + Encoder<
+                XactHashBatch<
+                    Types::RoundID,
+                    Types::HashID,
+                    Types::Seal,
+                    Types::Payload,
+                    Types::Effect,
+                    Types::Result,
+                    Types::Error
+                >
+            >,
         Enc::Config: Default,
         F: Frags {
         let (notifies, when) = self.state.get_notifies()?;
@@ -379,19 +447,31 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
 }
 
 impl<Types, Proc> ProcessorSessionRecv<Types, Proc>
-where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
-                      Types::Result, Types::Error>,
-      Types: HashClientComponentTypes {
+where
+    Proc: Processor<
+            Types::RoundID,
+            Types::Payload,
+            Types::Effect,
+            Types::Result,
+            Types::Error
+        >,
+    Types: HashClientComponentTypes
+{
     fn run_uncommitted(
         &mut self,
         req: XactSealed<
             Types::Seal,
-            XactUncommittedHashReq<Types::RoundID, Types::HashID,
-                                   Types::Payload, Types::Effect>
+            XactUncommittedHashReq<
+                Types::RoundID,
+                Types::HashID,
+                Types::Payload,
+                Types::Effect
+            >
         >
-    ) -> Result<XactNotify<Types::RoundID, Types::HashID,
-                           Types::Result, Types::Error>,
-                MutexPoison> {
+    ) -> Result<
+        XactNotify<Types::RoundID, Types::HashID, Types::Result, Types::Error>,
+        MutexPoison
+    > {
         let (_, req) = req.take();
         let (class, version, instance, hash, effects, payload) = req.take();
 
@@ -435,10 +515,12 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                         .map_err(|_| MutexPoison)?
                         .run_uncommitted(payload, when)
                         .map_err(|err| match err {
-                            ProcessorRunError::Run(err) =>
-                                XactError::Error { err: err },
-                            ProcessorRunError::EffectViolation =>
+                            ProcessorRunError::Run(err) => {
+                                XactError::Error { err: err }
+                            }
+                            ProcessorRunError::EffectViolation => {
                                 XactError::EffectViolation
+                            }
                         })
                 }
                 XactEffects::SoftNone => {
@@ -451,10 +533,12 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                         .map_err(|_| MutexPoison)?
                         .run_uncommitted(payload, None)
                         .map_err(|err| match err {
-                            ProcessorRunError::Run(err) =>
-                                XactError::Error { err: err },
-                            ProcessorRunError::EffectViolation =>
+                            ProcessorRunError::Run(err) => {
+                                XactError::Error { err: err }
+                            }
+                            ProcessorRunError::EffectViolation => {
                                 XactError::EffectViolation
+                            }
                         })
                 }
             }
@@ -482,9 +566,10 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
         hash: Types::HashID,
         round: Types::RoundID,
         req: XactCommittedReq<Types::Payload, Types::Effect>
-    ) -> Result<XactNotify<Types::RoundID, Types::HashID,
-                           Types::Result, Types::Error>,
-                MutexPoison> {
+    ) -> Result<
+        XactNotify<Types::RoundID, Types::HashID, Types::Result, Types::Error>,
+        MutexPoison
+    > {
         let (class, version, instance, idx, effects, payload) = req.take();
 
         info!(target: "processor-recv",
@@ -516,10 +601,12 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                 .map_err(|_| MutexPoison)?
                 .run_committed(payload, effects)
                 .map_err(|err| match err {
-                    ProcessorRunError::Run(err) =>
-                        XactError::Error { err: err },
-                    ProcessorRunError::EffectViolation =>
+                    ProcessorRunError::Run(err) => {
+                        XactError::Error { err: err }
+                    }
+                    ProcessorRunError::EffectViolation => {
                         XactError::EffectViolation
+                    }
                 })
         };
 
@@ -548,8 +635,12 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
         reqs: Vec<
             XactSealed<
                 Types::Seal,
-                XactUncommittedHashReq<Types::RoundID, Types::HashID,
-                                       Types::Payload, Types::Effect>
+                XactUncommittedHashReq<
+                    Types::RoundID,
+                    Types::HashID,
+                    Types::Payload,
+                    Types::Effect
+                >
             >
         >
     ) -> Result<bool, MutexPoison> {
@@ -582,30 +673,38 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
         >
     ) -> Result<
         bool,
-        WithMutexPoison<XactBatchCodecCreateError<
-            XactSealedCodecCreateError<
-                Types::SealCodecCreateError,
-                XactReqCodecCreateError<
-                    Types::PayloadCodecCreateError,
-                    Types::EffectCodecCreateError
+        WithMutexPoison<
+            XactBatchCodecCreateError<
+                XactSealedCodecCreateError<
+                    Types::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        Types::PayloadCodecCreateError,
+                        Types::EffectCodecCreateError
+                    >
+                >,
+                XactCommittedRoundCodecCreateError<
+                    Types::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        Types::PayloadCodecCreateError,
+                        Types::EffectCodecCreateError
+                    >
+                >,
+                XactNotifyCodecCreateError<
+                    Types::ResultCodecCreateError,
+                    Types::ErrorCodecCreateError
                 >
-            >,
-            XactCommittedRoundCodecCreateError<
-                Types::SealCodecCreateError,
-                XactReqCodecCreateError<
-                    Types::PayloadCodecCreateError,
-                    Types::EffectCodecCreateError
-                >
-            >,
-            XactNotifyCodecCreateError<
-                Types::ResultCodecCreateError,
-                Types::ErrorCodecCreateError
             >
-        >>
+        >
     > {
         let codec_config = XactBatchCodecConfig::default();
         let mut codec: XactHashBatchCodec<
-            Types::RoundID, Types::Hash, _, _, _, _, _,
+            Types::RoundID,
+            Types::Hash,
+            _,
+            _,
+            _,
+            _,
+            _,
             Types::SealCodec,
             Types::PayloadCodec,
             Types::EffectCodec,
@@ -636,7 +735,9 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                             if hashes.len() <= idx && hashes[idx] == hash {
                                 let res = self
                                     .run_committed(hash, id.clone(), req)
-                                    .map_err(|_| WithMutexPoison::MutexPoison)?;
+                                    .map_err(|_| {
+                                        WithMutexPoison::MutexPoison
+                                    })?;
                                 let hash = res.hash().clone();
 
                                 self.state.add_notify(hash, res)?;
@@ -690,9 +791,16 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
 
 impl<Types, Proc> AuthNMsgRecv<Types::MsgPrin, Types::AuthNMsg>
     for ProcessorSessionRecv<Types, Proc>
-where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
-                      Types::Result, Types::Error>,
-      Types: HashClientComponentTypes {
+where
+    Proc: Processor<
+            Types::RoundID,
+            Types::Payload,
+            Types::Effect,
+            Types::Result,
+            Types::Error
+        >,
+    Types: HashClientComponentTypes
+{
     type RecvError = WithMutexPoison<Error>;
 
     fn recv_auth_msg(
@@ -707,9 +815,11 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
               "received batch from {}",
               prin);
 
-        notify |= self.process_uncommitted_reqs(uncommitted)
+        notify |= self
+            .process_uncommitted_reqs(uncommitted)
             .map_err(|_| WithMutexPoison::MutexPoison)?;
-        notify |= self.process_committed_rounds(committed)
+        notify |= self
+            .process_committed_rounds(committed)
             .map_err(|_| WithMutexPoison::MutexPoison)?;
 
         for notify in notifies {
@@ -719,12 +829,17 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
         }
 
         if notify {
-            if let Some(notify) = &mut *self.state.notify.lock()
-                .map_err(|_| WithMutexPoison::MutexPoison)? {
+            if let Some(notify) = &mut *self
+                .state
+                .notify
+                .lock()
+                .map_err(|_| WithMutexPoison::MutexPoison)?
+            {
                 trace!(target: "processor-recv",
                        "notifying message thread");
 
-                notify.notify()
+                notify
+                    .notify()
                     .map_err(|err| WithMutexPoison::Inner { err: err })?;
             } else {
                 error!(target: "processor-recv",
@@ -740,25 +855,36 @@ impl ClientSessionCleanup for ProcessorSessionCleanup {
     fn cleanup(self) {}
 }
 
-impl<Types, Proc> UnicastClientSession<ProcessorSessionRecv<Types, Proc>,
-                                       ProcessorSessionMsgs<Types, Proc>>
-    for ProcessorSession<Types, Proc>
-where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
-                      Types::Result, Types::Error>,
-      Types: HashClientComponentTypes {
+impl<Types, Proc>
+    UnicastClientSession<
+        ProcessorSessionRecv<Types, Proc>,
+        ProcessorSessionMsgs<Types, Proc>
+    > for ProcessorSession<Types, Proc>
+where
+    Proc: Processor<
+            Types::RoundID,
+            Types::Payload,
+            Types::Effect,
+            Types::Result,
+            Types::Error
+        >,
+    Types: HashClientComponentTypes
+{
     type Cleanup = ProcessorSessionCleanup;
     type Config = ProcessorConfig<Proc::Config>;
-    type Param = ();
     type CreateError = Proc::CreateError;
+    type Param = ();
     type StartError = MutexPoison;
 
     fn create(
         config: Self::Config,
         _param: ()
     ) -> Result<
-            (Self,
-             ProcessorSessionRecv<Types, Proc>,
-             ProcessorSessionMsgs<Types, Proc>),
+        (
+            Self,
+            ProcessorSessionRecv<Types, Proc>,
+            ProcessorSessionMsgs<Types, Proc>
+        ),
         Self::CreateError
     > {
         let (proc_config, resubmit) = config.take();
@@ -789,7 +915,6 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
         };
 
         Ok((out, recv, msgs))
-
     }
 
     fn start(self) -> Result<Self::Cleanup, Self::StartError> {
@@ -815,15 +940,19 @@ pub struct StandaloneProcessor<ClientTypes, Types, Proc>
 where
     ClientTypes: HashClientComponentTypes,
     Types: HashUnicastClientComponentTypes<
-        ClientTypes,
-        Session = ProcessorSession<ClientTypes, Proc>,
-        SessionParam = (),
-        SessionConfig = ProcessorConfig<Proc::Config>,
-        Ctx = StandaloneCtx
-    >,
-    Proc: Processor<ClientTypes::RoundID, ClientTypes::Payload,
-                    ClientTypes::Effect, ClientTypes::Result,
-                    ClientTypes::Error> {
+            ClientTypes,
+            Session = ProcessorSession<ClientTypes, Proc>,
+            SessionParam = (),
+            SessionConfig = ProcessorConfig<Proc::Config>,
+            Ctx = StandaloneCtx
+        >,
+    Proc: Processor<
+            ClientTypes::RoundID,
+            ClientTypes::Payload,
+            ClientTypes::Effect,
+            ClientTypes::Result,
+            ClientTypes::Error
+        > {
     proc: PhantomData<Proc>,
     component: HashUnicastClientComponent<ClientTypes, Types>
 }
@@ -842,11 +971,11 @@ pub type SimpleStandaloneProcessor<ClientTypes, BusTypes, Proc> =
     >;
 
 #[cfg(feature = "standalone")]
-impl<ClientTypes, Types>
-    StandaloneProcessorRunCleanup<ClientTypes, Types>
+impl<ClientTypes, Types> StandaloneProcessorRunCleanup<ClientTypes, Types>
 where
     ClientTypes: 'static + HashClientComponentTypes,
-    Types: 'static + HashUnicastClientComponentTypes<ClientTypes> {
+    Types: 'static + HashUnicastClientComponentTypes<ClientTypes>
+{
     fn cleanup(self) {
         self.component.cleanup()
     }
@@ -858,16 +987,21 @@ impl<ClientTypes, Types, Proc> Standalone
 where
     ClientTypes: HashClientComponentTypes,
     Types: HashUnicastClientComponentTypes<
-        ClientTypes,
-        Session = ProcessorSession<ClientTypes, Proc>,
-        SessionParam = (),
-        SessionConfig = ProcessorConfig<Proc::Config>,
-        Ctx = StandaloneCtx
-    >,
-    Proc: Processor<ClientTypes::RoundID, ClientTypes::Payload,
-                    ClientTypes::Effect, ClientTypes::Result,
-                    ClientTypes::Error>,
-    Proc::Config: for<'a> Deserialize<'a> + Serialize {
+            ClientTypes,
+            Session = ProcessorSession<ClientTypes, Proc>,
+            SessionParam = (),
+            SessionConfig = ProcessorConfig<Proc::Config>,
+            Ctx = StandaloneCtx
+        >,
+    Proc: Processor<
+            ClientTypes::RoundID,
+            ClientTypes::Payload,
+            ClientTypes::Effect,
+            ClientTypes::Result,
+            ClientTypes::Error
+        >,
+    Proc::Config: for<'a> Deserialize<'a> + Serialize
+{
     type Config = ProcessorClientConfig<
         Proc::Config,
         ClientTypes::SealCodecConfig,
@@ -900,15 +1034,16 @@ where
         config: Self::Config
     ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
         let (name_caches_config, client_config) = config.take();
-        let (caches, caches_join, shutdown) =
-            ThreadedNSNameCaches::create(name_caches_config)
-            .map_err(|err| {
-                error!(target: "processor-standalone",
+        let (caches, caches_join, shutdown) = ThreadedNSNameCaches::create(
+            name_caches_config
+        )
+        .map_err(|err| {
+            error!(target: "processor-standalone",
                        "error creating name caches: {}",
                        err);
 
-                StandaloneProcessorCreateCleanup { caches: None }
-            })?;
+            StandaloneProcessorCreateCleanup { caches: None }
+        })?;
         let ctx = StandaloneCtx::new(caches);
         let cleanup = StandaloneProcessorCreateCleanup {
             caches: Some((shutdown.clone(), caches_join))
@@ -940,21 +1075,27 @@ impl<ClientTypes, Types, Proc> StandaloneService
     for StandaloneProcessor<ClientTypes, Types, Proc>
 where
     ClientTypes: 'static + HashClientComponentTypes,
-    Types: 'static + HashUnicastClientComponentTypes<
-        ClientTypes,
-        Session = ProcessorSession<ClientTypes, Proc>,
-        SessionParam = (),
-        SessionConfig = ProcessorConfig<Proc::Config>,
-        Ctx = StandaloneCtx
-    >,
-    Proc: Processor<ClientTypes::RoundID, ClientTypes::Payload,
-                    ClientTypes::Effect, ClientTypes::Result,
-                    ClientTypes::Error>,
-    Proc::Config: for<'a> Deserialize<'a> + Serialize {
-    const DEFAULT_PIDFILE: &str = Proc::DEFAULT_PIDFILE;
-
+    Types: 'static
+        + HashUnicastClientComponentTypes<
+            ClientTypes,
+            Session = ProcessorSession<ClientTypes, Proc>,
+            SessionParam = (),
+            SessionConfig = ProcessorConfig<Proc::Config>,
+            Ctx = StandaloneCtx
+        >,
+    Proc: Processor<
+            ClientTypes::RoundID,
+            ClientTypes::Payload,
+            ClientTypes::Effect,
+            ClientTypes::Result,
+            ClientTypes::Error
+        >,
+    Proc::Config: for<'a> Deserialize<'a> + Serialize
+{
     type RunCleanup = StandaloneProcessorRunCleanup<ClientTypes, Types>;
     type RunErrorCleanup = ();
+
+    const DEFAULT_PIDFILE: &str = Proc::DEFAULT_PIDFILE;
 
     fn run(
         self,
@@ -962,9 +1103,8 @@ where
     ) -> Result<Self::RunCleanup, Self::RunErrorCleanup> {
         match self.component.start() {
             Ok(cleanup) => {
-                let cleanup = StandaloneProcessorRunCleanup {
-                    component: cleanup
-                };
+                let cleanup =
+                    StandaloneProcessorRunCleanup { component: cleanup };
 
                 Ok(cleanup)
             }

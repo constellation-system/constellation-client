@@ -30,8 +30,8 @@ use constellation_channels::config::CompoundFarEndpoint;
 use constellation_channels::config::ResolverConfig;
 use constellation_channels::far::compound::CompoundFlow;
 use constellation_channels::far::types::CompoundFarChannelsBasicAuthNedLargeObjChan;
-use constellation_channels::resolve::cache::NSNameCachesCtx;
 use constellation_channels::resolve::MixedResolver;
+use constellation_channels::resolve::cache::NSNameCachesCtx;
 use constellation_common::hashid::SHA3Algo;
 use constellation_common::hashid::SHA3ID;
 use constellation_common::ids::AscendingCount;
@@ -46,12 +46,12 @@ use constellation_component_common::xact::test::TestBatch;
 use constellation_component_common::xact::test::TestBatchCodec;
 use constellation_component_common::xact::test::TestBatchCodecCreateError;
 use constellation_component_common::xact::test::TestBatchCodecEncodeError;
-use constellation_component_common::xact::test::TestHashBatch;
-use constellation_component_common::xact::test::TestHashBatchCodec;
 use constellation_component_common::xact::test::TestEffects;
 use constellation_component_common::xact::test::TestEffectsCodec;
 use constellation_component_common::xact::test::TestError;
 use constellation_component_common::xact::test::TestErrorCodec;
+use constellation_component_common::xact::test::TestHashBatch;
+use constellation_component_common::xact::test::TestHashBatchCodec;
 use constellation_component_common::xact::test::TestPayload;
 use constellation_component_common::xact::test::TestPayloadCodec;
 use constellation_component_common::xact::test::TestResult;
@@ -66,7 +66,9 @@ use constellation_streams::threads::poll::MsgsSetNotify;
 use crate::component::ClientComponentTypes;
 use crate::component::HashClientComponentTypes;
 
+#[derive(Clone)]
 pub struct TestClientComponentTypes;
+#[derive(Clone)]
 pub struct TestHashClientComponentTypes;
 
 pub struct TestBusTypes<Msgs, Recv, Ctx>
@@ -83,7 +85,8 @@ pub struct TestHashBusTypes<Msgs, Recv, Ctx>
 where
     Msgs: LargeObjMsgs<SHA3Algo, TestHashBatch> + MsgsSetNotify + Send,
     Recv: Clone
-        + AuthNMsgRecv<String, BasicAuthNed<String, TestHashBatch>> + Send,
+        + AuthNMsgRecv<String, BasicAuthNed<String, TestHashBatch>>
+        + Send,
     Ctx: NSNameCachesCtx + Send {
     msgs: PhantomData<Msgs>,
     recv: PhantomData<Recv>,
@@ -91,65 +94,36 @@ where
 }
 
 impl ClientComponentTypes for TestClientComponentTypes {
-    type RoundID = u128;
-    type MsgPrin = String;
+    type AuthNMsg = BasicAuthNed<String, TestBatch>;
+    type Effect = TestEffects;
+    type EffectCodec = TestEffectsCodec;
+    type EffectCodecConfig = ();
+    type EffectCodecCreateError = Infallible;
+    type Error = TestError;
+    type ErrorCodec = TestErrorCodec;
+    type ErrorCodecConfig = ();
+    type ErrorCodecCreateError = Infallible;
     type Hash = SHA3Algo;
     type HashConfig = ();
     type HashCreateError = Infallible;
     type HashID = SHA3ID;
-    type Seal = TestSeal;
+    type MsgPrin = String;
     type Payload = TestPayload;
-    type Effect = TestEffects;
-    type Result = TestResult;
-    type Error = TestError;
-    type SealCodec = TestSealCodec;
-    type SealCodecConfig = ();
-    type SealCodecCreateError = Infallible;
     type PayloadCodec = TestPayloadCodec;
     type PayloadCodecConfig = ();
     type PayloadCodecCreateError = Infallible;
-    type EffectCodec = TestEffectsCodec;
-    type EffectCodecConfig = ();
-    type EffectCodecCreateError = Infallible;
+    type Result = TestResult;
     type ResultCodec = TestResultCodec;
     type ResultCodecConfig = ();
     type ResultCodecCreateError = Infallible;
-    type ErrorCodec = TestErrorCodec;
-    type ErrorCodecConfig = ();
-    type ErrorCodecCreateError = Infallible;
-    type AuthNMsg = BasicAuthNed<
-        String,
-        TestBatch
-    >;
+    type RoundID = u128;
+    type Seal = TestSeal;
+    type SealCodec = TestSealCodec;
+    type SealCodecConfig = ();
+    type SealCodecCreateError = Infallible;
 }
 
 impl HashClientComponentTypes for TestHashClientComponentTypes {
-    type RoundID = u128;
-    type MsgPrin = String;
-    type Hash = SHA3Algo;
-    type HashConfig = ();
-    type HashCreateError = Infallible;
-    type HashID = SHA3ID;
-    type Seal = TestSeal;
-    type Payload = TestPayload;
-    type Effect = TestEffects;
-    type Result = TestResult;
-    type Error = TestError;
-    type SealCodec = TestSealCodec;
-    type SealCodecConfig = ();
-    type SealCodecCreateError = Infallible;
-    type PayloadCodec = TestPayloadCodec;
-    type PayloadCodecConfig = ();
-    type PayloadCodecCreateError = Infallible;
-    type EffectCodec = TestEffectsCodec;
-    type EffectCodecConfig = ();
-    type EffectCodecCreateError = Infallible;
-    type ResultCodec = TestResultCodec;
-    type ResultCodecConfig = ();
-    type ResultCodecCreateError = Infallible;
-    type ErrorCodec = TestErrorCodec;
-    type ErrorCodecConfig = ();
-    type ErrorCodecCreateError = Infallible;
     type AuthNMsg = BasicAuthNed<
         String,
         XactHashBatch<
@@ -162,6 +136,32 @@ impl HashClientComponentTypes for TestHashClientComponentTypes {
             Self::Error
         >
     >;
+    type Effect = TestEffects;
+    type EffectCodec = TestEffectsCodec;
+    type EffectCodecConfig = ();
+    type EffectCodecCreateError = Infallible;
+    type Error = TestError;
+    type ErrorCodec = TestErrorCodec;
+    type ErrorCodecConfig = ();
+    type ErrorCodecCreateError = Infallible;
+    type Hash = SHA3Algo;
+    type HashConfig = ();
+    type HashCreateError = Infallible;
+    type HashID = SHA3ID;
+    type MsgPrin = String;
+    type Payload = TestPayload;
+    type PayloadCodec = TestPayloadCodec;
+    type PayloadCodecConfig = ();
+    type PayloadCodecCreateError = Infallible;
+    type Result = TestResult;
+    type ResultCodec = TestResultCodec;
+    type ResultCodecConfig = ();
+    type ResultCodecCreateError = Infallible;
+    type RoundID = u128;
+    type Seal = TestSeal;
+    type SealCodec = TestSealCodec;
+    type SealCodecConfig = ();
+    type SealCodecCreateError = Infallible;
 }
 
 impl<Msgs, Recv, Ctx> UnicastLargeObjBusTypes<Ctx>
@@ -169,7 +169,8 @@ impl<Msgs, Recv, Ctx> UnicastLargeObjBusTypes<Ctx>
 where
     Msgs: LargeObjMsgs<SHA3Algo, TestBatch> + MsgsSetNotify + Send,
     Recv: Clone + AuthNMsgRecv<String, BasicAuthNed<String, TestBatch>> + Send,
-    Ctx: 'static + NSNameCachesCtx + Send {
+    Ctx: 'static + NSNameCachesCtx + Send
+{
     type AuthNChan = CompoundFarChannelsBasicAuthNedLargeObjChan<
         String,
         SHA3Algo,
@@ -187,10 +188,10 @@ where
     type Decoder = TestBatchCodec;
     type DecoderConfig = XactBatchCodecConfig<(), (), (), (), ()>;
     type DecoderCreateError = TestBatchCodecCreateError;
+    type EncodeError = TestBatchCodecEncodeError;
     type Encoder = TestBatchCodec;
     type EncoderConfig = XactBatchCodecConfig<(), (), (), (), ()>;
     type EncoderCreateError = TestBatchCodecCreateError;
-    type EncodeError = TestBatchCodecEncodeError;
     type Epoch = u128;
     type Epochs = AscendingCount<u128>;
     type EpochsConfig = ();
@@ -212,9 +213,9 @@ where
     type MsgAuthError = Infallible;
     type MsgPrin = String;
     type Msgs = Msgs;
-    type Recv = Recv;
     type Origin = CompoundFarEndpoint;
     type OutMsg = TestBatch;
+    type Recv = Recv;
     type Resolver =
         MixedResolver<CompoundFarChannelXfrmPeerAddr, CompoundFarEndpoint>;
     type ResolverConfig = ResolverConfig;
@@ -236,9 +237,10 @@ impl<Msgs, Recv, Ctx> UnicastLargeObjBusTypes<Ctx>
 where
     Msgs: LargeObjMsgs<SHA3Algo, TestHashBatch> + MsgsSetNotify + Send,
     Recv: Clone
-    + AuthNMsgRecv<String, BasicAuthNed<String, TestHashBatch>>
-    + Send,
-    Ctx: 'static + NSNameCachesCtx + Send {
+        + AuthNMsgRecv<String, BasicAuthNed<String, TestHashBatch>>
+        + Send,
+    Ctx: 'static + NSNameCachesCtx + Send
+{
     type AuthNChan = CompoundFarChannelsBasicAuthNedLargeObjChan<
         String,
         SHA3Algo,
@@ -256,10 +258,10 @@ where
     type Decoder = TestHashBatchCodec;
     type DecoderConfig = XactBatchCodecConfig<(), (), (), (), ()>;
     type DecoderCreateError = TestBatchCodecCreateError;
+    type EncodeError = TestBatchCodecEncodeError;
     type Encoder = TestHashBatchCodec;
     type EncoderConfig = XactBatchCodecConfig<(), (), (), (), ()>;
     type EncoderCreateError = TestBatchCodecCreateError;
-    type EncodeError = TestBatchCodecEncodeError;
     type Epoch = u128;
     type Epochs = AscendingCount<u128>;
     type EpochsConfig = ();
@@ -281,9 +283,9 @@ where
     type MsgAuthError = Infallible;
     type MsgPrin = String;
     type Msgs = Msgs;
-    type Recv = Recv;
     type Origin = CompoundFarEndpoint;
     type OutMsg = TestHashBatch;
+    type Recv = Recv;
     type Resolver =
         MixedResolver<CompoundFarChannelXfrmPeerAddr, CompoundFarEndpoint>;
     type ResolverConfig = ResolverConfig;
@@ -305,7 +307,8 @@ impl<Msgs, Recv, Ctx> MulticastLargeObjBusTypes<Ctx>
 where
     Msgs: LargeObjMsgs<SHA3Algo, TestBatch> + MsgsSetNotify + Send,
     Recv: Clone + AuthNMsgRecv<String, BasicAuthNed<String, TestBatch>> + Send,
-    Ctx: 'static + NSNameCachesCtx + Send {
+    Ctx: 'static + NSNameCachesCtx + Send
+{
     type AuthNChan = CompoundFarChannelsBasicAuthNedLargeObjChan<
         String,
         SHA3Algo,
@@ -323,10 +326,10 @@ where
     type Decoder = TestBatchCodec;
     type DecoderConfig = XactBatchCodecConfig<(), (), (), (), ()>;
     type DecoderCreateError = TestBatchCodecCreateError;
+    type EncodeError = TestBatchCodecEncodeError;
     type Encoder = TestBatchCodec;
     type EncoderConfig = XactBatchCodecConfig<(), (), (), (), ()>;
     type EncoderCreateError = TestBatchCodecCreateError;
-    type EncodeError = TestBatchCodecEncodeError;
     type Epoch = u128;
     type Epochs = AscendingCount<u128>;
     type EpochsConfig = ();
@@ -348,9 +351,9 @@ where
     type MsgAuthError = Infallible;
     type MsgPrin = String;
     type Msgs = Msgs;
-    type Recv = Recv;
     type Origin = CompoundFarEndpoint;
     type OutMsg = TestBatch;
+    type Recv = Recv;
     type Resolver =
         MixedResolver<CompoundFarChannelXfrmPeerAddr, CompoundFarEndpoint>;
     type ResolverConfig = ResolverConfig;
@@ -372,9 +375,10 @@ impl<Msgs, Recv, Ctx> MulticastLargeObjBusTypes<Ctx>
 where
     Msgs: LargeObjMsgs<SHA3Algo, TestHashBatch> + MsgsSetNotify + Send,
     Recv: Clone
-    + AuthNMsgRecv<String, BasicAuthNed<String, TestHashBatch>>
-    + Send,
-    Ctx: 'static + NSNameCachesCtx + Send {
+        + AuthNMsgRecv<String, BasicAuthNed<String, TestHashBatch>>
+        + Send,
+    Ctx: 'static + NSNameCachesCtx + Send
+{
     type AuthNChan = CompoundFarChannelsBasicAuthNedLargeObjChan<
         String,
         SHA3Algo,
@@ -392,10 +396,10 @@ where
     type Decoder = TestHashBatchCodec;
     type DecoderConfig = XactBatchCodecConfig<(), (), (), (), ()>;
     type DecoderCreateError = TestBatchCodecCreateError;
+    type EncodeError = TestBatchCodecEncodeError;
     type Encoder = TestHashBatchCodec;
     type EncoderConfig = XactBatchCodecConfig<(), (), (), (), ()>;
     type EncoderCreateError = TestBatchCodecCreateError;
-    type EncodeError = TestBatchCodecEncodeError;
     type Epoch = u128;
     type Epochs = AscendingCount<u128>;
     type EpochsConfig = ();
@@ -417,9 +421,9 @@ where
     type MsgAuthError = Infallible;
     type MsgPrin = String;
     type Msgs = Msgs;
-    type Recv = Recv;
     type Origin = CompoundFarEndpoint;
     type OutMsg = TestHashBatch;
+    type Recv = Recv;
     type Resolver =
         MixedResolver<CompoundFarChannelXfrmPeerAddr, CompoundFarEndpoint>;
     type ResolverConfig = ResolverConfig;

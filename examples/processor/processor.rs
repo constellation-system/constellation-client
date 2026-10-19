@@ -32,13 +32,14 @@ use constellation_component_common::xact::test::TestPayload;
 use constellation_component_common::xact::test::TestResult;
 use log::debug;
 
+#[derive(Clone)]
 pub struct ExampleProcessor;
 
 pub type StandaloneExampleProcessor = SimpleStandaloneProcessor<
-        TestHashClientComponentTypes,
-        StandaloneTestProcessorBusTypes<ExampleProcessor>,
-        ExampleProcessor
-    >;
+    TestHashClientComponentTypes,
+    StandaloneTestProcessorBusTypes<ExampleProcessor>,
+    ExampleProcessor
+>;
 
 impl Create for ExampleProcessor {
     type Config = ();
@@ -51,11 +52,12 @@ impl Create for ExampleProcessor {
 }
 
 impl Processor<u128, TestPayload, TestEffects, TestResult, TestError>
-    for ExampleProcessor {
-    const SERVICE_ID: &str = "org.constellation.example";
-    const SERVICE_NAME: &str = "example-processor";
+    for ExampleProcessor
+{
     const CONFIG_FILES: &[&str] = &[&"example-processor.yml"];
     const DEFAULT_PIDFILE: &str = "/tmp/example-processor.pid";
+    const SERVICE_ID: &str = "org.constellation.example";
+    const SERVICE_NAME: &str = "example-processor";
 
     fn run_uncommitted(
         &mut self,

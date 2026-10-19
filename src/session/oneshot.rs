@@ -61,8 +61,8 @@ use constellation_standalone::Standalone;
 #[cfg(feature = "standalone")]
 use constellation_standalone::StandaloneApp;
 use constellation_streams::frags::Frags;
-use constellation_streams::large_obj::LargeObjProtoAddOutboundError;
 use constellation_streams::large_obj::LargeObjMsgs;
+use constellation_streams::large_obj::LargeObjProtoAddOutboundError;
 use constellation_streams::large_obj::LargeObjSender;
 use constellation_streams::multicast::MulticastStreamIdx;
 use constellation_streams::threads::poll::MsgsSetNotify;
@@ -75,10 +75,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::session::ClientSessionCleanup;
-#[cfg(feature = "standalone")]
-use crate::config::OneShotClientConfig;
-use crate::config::OneShotConfig;
 use crate::component::ClientComponentTypes;
 #[cfg(feature = "standalone")]
 use crate::component::multicast::MulticastClientComponent;
@@ -87,12 +83,17 @@ use crate::component::multicast::MulticastClientComponentTypes;
 use crate::component::multicast::MulticastClientParam;
 #[cfg(feature = "standalone")]
 use crate::component::multicast::SimpleMulticastClientComponentTypes;
+#[cfg(feature = "standalone")]
+use crate::config::OneShotClientConfig;
+use crate::config::OneShotConfig;
+use crate::session::ClientSessionCleanup;
 use crate::session::MulticastClientSession;
 #[cfg(feature = "standalone")]
 use crate::standalone::StandaloneCtx;
 
 pub trait OneShot<RoundID, Req, Eff, Seal>: Create
-where RoundID: Clone + From<u128> + Into<u128> {
+where
+    RoundID: Clone + From<u128> + Into<u128> {
     const NAME: &str;
     #[cfg(feature = "standalone")]
     const CONFIG_FILES: &[&str];
@@ -112,9 +113,7 @@ where RoundID: Clone + From<u128> + Into<u128> {
     ) -> Result<Seal, Self::CreateSealError>;
 
     #[cfg(feature = "standalone")]
-    fn get_arg(
-        args: ArgMatches
-    ) -> Result<Self::Param, Self::GetArgError>;
+    fn get_arg(args: ArgMatches) -> Result<Self::Param, Self::GetArgError>;
 
     #[cfg(feature = "standalone")]
     fn cmdargs(cmd: Command) -> Command {
@@ -123,69 +122,81 @@ where RoundID: Clone + From<u128> + Into<u128> {
 }
 
 struct OneShotMsg<RoundID, Payload, Effect, Seal>
-where RoundID: Clone + From<u128> + Into<u128> {
-    msg: XactSealed<
-        Seal,
-        XactUncommittedReq<RoundID, Payload, Effect>,
-    >,
+where
+    RoundID: Clone + From<u128> + Into<u128> {
+    msg: XactSealed<Seal, XactUncommittedReq<RoundID, Payload, Effect>>,
     nretries: usize,
     when: Instant
 }
 
 pub struct OneShotSession<Types, App>
-where Types: ClientComponentTypes,
-      App: OneShot<Types::RoundID, Types::Payload, Types::Effect, Types::Seal> {
+where
+    Types: ClientComponentTypes,
+    App: OneShot<Types::RoundID, Types::Payload, Types::Effect, Types::Seal> {
     types: PhantomData<Types>,
     os: PhantomData<App>
 }
 
 pub struct OneShotState<Types>
-where Types: ClientComponentTypes {
-    msg: Mutex<Option<OneShotMsg<Types::RoundID, Types::Payload,
-                                 Types::Effect, Types::Seal>>>,
+where
+    Types: ClientComponentTypes {
+    msg: Mutex<
+        Option<
+            OneShotMsg<
+                Types::RoundID,
+                Types::Payload,
+                Types::Effect,
+                Types::Seal
+            >
+        >
+    >,
     notify: Mutex<Option<Notify>>,
-    resubmit: Retry,
+    resubmit: Retry
 }
 
 #[derive(Clone)]
 pub struct OneShotSessionMsgs<Types>
-where Types: ClientComponentTypes {
-    state: Arc<OneShotState<Types>>,
+where
+    Types: ClientComponentTypes {
+    state: Arc<OneShotState<Types>>
 }
 
 #[derive(Clone)]
 pub struct OneShotSessionRecv<Types>
-where Types: ClientComponentTypes {
-    state: Arc<OneShotState<Types>>,
+where
+    Types: ClientComponentTypes {
+    state: Arc<OneShotState<Types>>
 }
 
 pub struct OneShotSessionCleanup;
 
 #[derive(Debug)]
 pub enum OneShotError<Create, Seal> {
-    Create {
-        err: Create
-    },
-    Seal {
-        err: Seal
-    }
+    Create { err: Create },
+    Seal { err: Seal }
 }
 
 impl<Types> OneShotState<Types>
-where Types: ClientComponentTypes {
+where
+    Types: ClientComponentTypes
+{
     fn get_batch(
-        &self,
+        &self
     ) -> Result<
-        (Option<XactBatch<
-             Types::RoundID,
-             Types::HashID,
-             Types::Seal,
-             Types::Payload,
-             Types::Effect,
-             Types::Result,
-             Types::Error
-         >>,
-         Option<Instant>),
+        (
+            Option<
+                XactBatch<
+                    Types::RoundID,
+                    Types::HashID,
+                    Types::Seal,
+                    Types::Payload,
+                    Types::Effect,
+                    Types::Result,
+                    Types::Error
+                >
+            >,
+            Option<Instant>
+        ),
         MutexPoison
     > {
         if let Some(msg) = &mut *self.msg.lock().map_err(|_| MutexPoison)? {
@@ -235,7 +246,9 @@ where Types: ClientComponentTypes {
 }
 
 impl<Types> MsgsSetNotify for OneShotSessionMsgs<Types>
-where Types: ClientComponentTypes {
+where
+    Types: ClientComponentTypes
+{
     type Error = MutexPoison;
 
     #[inline]
@@ -249,19 +262,22 @@ where Types: ClientComponentTypes {
     }
 }
 
-impl<Types> LargeObjMsgs<
-    Types::Hash,
-    XactBatch<
-        Types::RoundID,
-        Types::HashID,
-        Types::Seal,
-        Types::Payload,
-        Types::Effect,
-        Types::Result,
-        Types::Error
-    >
-> for OneShotSessionMsgs<Types>
-where Types: ClientComponentTypes {
+impl<Types>
+    LargeObjMsgs<
+        Types::Hash,
+        XactBatch<
+            Types::RoundID,
+            Types::HashID,
+            Types::Seal,
+            Types::Payload,
+            Types::Effect,
+            Types::Result,
+            Types::Error
+        >
+    > for OneShotSessionMsgs<Types>
+where
+    Types: ClientComponentTypes
+{
     type AddMsgsError<Encode>
         = WithMutexPoison<LargeObjProtoAddOutboundError<Encode>>
     where
@@ -285,16 +301,19 @@ where Types: ClientComponentTypes {
         >
     ) -> Result<Option<Instant>, Self::AddMsgsError<Enc::EncodeError>>
     where
-        Enc: Clone + Create
-            + Encoder<XactBatch<
-                Types::RoundID,
-                Types::HashID,
-                Types::Seal,
-                Types::Payload,
-                Types::Effect,
-                Types::Result,
-                Types::Error
-            >>,
+        Enc: Clone
+            + Create
+            + Encoder<
+                XactBatch<
+                    Types::RoundID,
+                    Types::HashID,
+                    Types::Seal,
+                    Types::Payload,
+                    Types::Effect,
+                    Types::Result,
+                    Types::Error
+                >
+            >,
         Enc::Config: Default,
         F: Frags {
         let (batch, when) = self
@@ -314,7 +333,9 @@ where Types: ClientComponentTypes {
 
 impl<Types> AuthNMsgRecv<Types::MsgPrin, Types::AuthNMsg>
     for OneShotSessionRecv<Types>
-where Types: ClientComponentTypes {
+where
+    Types: ClientComponentTypes
+{
     type RecvError = MutexPoison;
 
     fn recv_auth_msg(
@@ -357,34 +378,37 @@ impl ClientSessionCleanup for OneShotSessionCleanup {
     fn cleanup(self) {}
 }
 
-impl<Types, Prin, App> MulticastClientSession<Prin,
-                                              OneShotSessionRecv<Types>,
-                                              OneShotSessionMsgs<Types>>
-    for OneShotSession<Types, App>
-where Types: ClientComponentTypes,
-      App: OneShot<Types::RoundID, Types::Payload, Types::Effect, Types::Seal> {
+impl<Types, Prin, App>
+    MulticastClientSession<
+        Prin,
+        OneShotSessionRecv<Types>,
+        OneShotSessionMsgs<Types>
+    > for OneShotSession<Types, App>
+where
+    Types: ClientComponentTypes,
+    App: OneShot<Types::RoundID, Types::Payload, Types::Effect, Types::Seal>
+{
     type Cleanup = OneShotSessionCleanup;
     type Config = OneShotConfig<App::Config>;
     type CreateError = OneShotError<App::CreateError, App::CreateSealError>;
-    type StartError = MutexPoison;
     type Param = App::Param;
+    type StartError = MutexPoison;
 
     fn create(
         config: Self::Config,
         param: App::Param
     ) -> Result<
-            (Self,
-             OneShotSessionRecv<Types>,
-             OneShotSessionMsgs<Types>),
+        (Self, OneShotSessionRecv<Types>, OneShotSessionMsgs<Types>),
         Self::CreateError
     > {
         let (app_config, resubmit) = config.take();
         let os = App::create(app_config)
             .map_err(|err| OneShotError::Create { err: err })?;
         let (uuid, version, instance, payload, effects) = os.get_msg(param);
-        let req = XactUncommittedReq::new(uuid, version, instance,
-                                          payload, effects);
-        let seal = os.create_seal(&req)
+        let req =
+            XactUncommittedReq::new(uuid, version, instance, payload, effects);
+        let seal = os
+            .create_seal(&req)
             .map_err(|err| OneShotError::Seal { err: err })?;
         let msg = OneShotMsg {
             msg: XactSealed::new(seal, req),
@@ -398,11 +422,9 @@ where Types: ClientComponentTypes,
         };
         let state = Arc::new(state);
         let msgs = OneShotSessionMsgs {
-            state: state.clone(),
+            state: state.clone()
         };
-        let recv = OneShotSessionRecv {
-            state: state,
-        };
+        let recv = OneShotSessionRecv { state: state };
         let out = OneShotSession {
             types: PhantomData,
             os: PhantomData
@@ -422,8 +444,9 @@ where Types: ClientComponentTypes,
 }
 
 impl<Create, Seal> Display for OneShotError<Create, Seal>
-where Create: Display,
-      Seal: Display
+where
+    Create: Display,
+    Seal: Display
 {
     fn fmt(
         &self,
@@ -431,7 +454,7 @@ where Create: Display,
     ) -> Result<(), Error> {
         match self {
             OneShotError::Create { err } => err.fmt(f),
-            OneShotError::Seal { err } => err.fmt(f),
+            OneShotError::Seal { err } => err.fmt(f)
         }
     }
 }
@@ -444,7 +467,7 @@ pub struct StandaloneOneShotCreateCleanup {
 #[cfg(feature = "standalone")]
 pub struct StandaloneOneShotRunCleanup {
     shutdown: ShutdownFlag,
-    caches_join: JoinHandle<()>,
+    caches_join: JoinHandle<()>
 }
 
 #[cfg(feature = "standalone")]
@@ -452,12 +475,15 @@ pub struct StandaloneOneShot<ClientTypes, Types, App>
 where
     ClientTypes: ClientComponentTypes,
     Types: MulticastClientComponentTypes<ClientTypes>,
-    App: OneShot<ClientTypes::RoundID, ClientTypes::Payload,
-                 ClientTypes::Effect, ClientTypes::Seal> {
+    App: OneShot<
+            ClientTypes::RoundID,
+            ClientTypes::Payload,
+            ClientTypes::Effect,
+            ClientTypes::Seal
+        > {
     app: PhantomData<App>,
     component: MulticastClientComponent<ClientTypes, Types>
 }
-
 
 #[cfg(feature = "standalone")]
 pub type SimpleStandaloneOneShot<ClientTypes, BusTypes, App> =
@@ -487,15 +513,20 @@ impl<ClientTypes, Types, App> Standalone
 where
     ClientTypes: ClientComponentTypes,
     Types: MulticastClientComponentTypes<
-        ClientTypes,
-        Session = OneShotSession<ClientTypes, App>,
-        SessionParam = App::Param,
-        SessionConfig = OneShotConfig<App::Config>,
-        Ctx = StandaloneCtx
-    >,
-    App: OneShot<ClientTypes::RoundID, ClientTypes::Payload,
-                 ClientTypes::Effect, ClientTypes::Seal>,
-    App::Config: for<'a> Deserialize<'a> + Serialize {
+            ClientTypes,
+            Session = OneShotSession<ClientTypes, App>,
+            SessionParam = App::Param,
+            SessionConfig = OneShotConfig<App::Config>,
+            Ctx = StandaloneCtx
+        >,
+    App: OneShot<
+            ClientTypes::RoundID,
+            ClientTypes::Payload,
+            ClientTypes::Effect,
+            ClientTypes::Seal
+        >,
+    App::Config: for<'a> Deserialize<'a> + Serialize
+{
     type Config = OneShotClientConfig<
         Types::SessionPrin,
         App::Config,
@@ -534,15 +565,16 @@ where
         config: Self::Config
     ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
         let (name_caches_config, client_config) = config.take();
-        let (caches, caches_join, shutdown) =
-            ThreadedNSNameCaches::create(name_caches_config)
-            .map_err(|err| {
-                error!(target: "one-shot-standalone",
+        let (caches, caches_join, shutdown) = ThreadedNSNameCaches::create(
+            name_caches_config
+        )
+        .map_err(|err| {
+            error!(target: "one-shot-standalone",
                        "error creating name caches: {}",
                        err);
 
-                StandaloneOneShotCreateCleanup { caches: None }
-            })?;
+            StandaloneOneShotCreateCleanup { caches: None }
+        })?;
         let ctx = StandaloneCtx::new(caches);
         let cleanup = StandaloneOneShotCreateCleanup {
             caches: Some((shutdown.clone(), caches_join))
@@ -586,16 +618,22 @@ impl<ClientTypes, Types, App> StandaloneApp
     for StandaloneOneShot<ClientTypes, Types, App>
 where
     ClientTypes: 'static + ClientComponentTypes,
-    Types: 'static + MulticastClientComponentTypes<
-        ClientTypes,
-        Session = OneShotSession<ClientTypes, App>,
-        SessionParam = App::Param,
-        SessionConfig = OneShotConfig<App::Config>,
-        Ctx = StandaloneCtx
-    >,
-    App: OneShot<ClientTypes::RoundID, ClientTypes::Payload,
-                 ClientTypes::Effect, ClientTypes::Seal>,
-    App::Config: for<'a> Deserialize<'a> + Serialize {
+    Types: 'static
+        + MulticastClientComponentTypes<
+            ClientTypes,
+            Session = OneShotSession<ClientTypes, App>,
+            SessionParam = App::Param,
+            SessionConfig = OneShotConfig<App::Config>,
+            Ctx = StandaloneCtx
+        >,
+    App: OneShot<
+            ClientTypes::RoundID,
+            ClientTypes::Payload,
+            ClientTypes::Effect,
+            ClientTypes::Seal
+        >,
+    App::Config: for<'a> Deserialize<'a> + Serialize
+{
     type RunErrorCleanup = ();
 
     fn run(self) -> Result<(), Self::RunErrorCleanup> {

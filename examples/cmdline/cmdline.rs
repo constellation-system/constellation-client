@@ -43,10 +43,10 @@ use uuid::Uuid;
 pub struct ExampleCmdLine;
 
 pub type StandaloneExampleCmdLine = SimpleStandaloneOneShot<
-        TestClientComponentTypes,
-        StandaloneTestOneShotBusTypes,
-        ExampleCmdLine
-    >;
+    TestClientComponentTypes,
+    StandaloneTestOneShotBusTypes,
+    ExampleCmdLine
+>;
 
 const EXAMPLE_SERVICE_NAME: &str = "org.constellation.example";
 const EXAMPLE_VERSION: Version = Version::new(0, 0, 0);
@@ -71,9 +71,7 @@ pub enum CmdlineMode {
 
 #[derive(Debug)]
 pub enum ExampleGetArgsError {
-    BadCmd {
-        cmd: String
-    },
+    BadCmd { cmd: String },
     NoCmd
 }
 
@@ -88,17 +86,23 @@ impl Create for ExampleCmdLine {
 }
 
 impl OneShot<u128, TestPayload, TestEffects, TestSeal> for ExampleCmdLine {
-    const NAME: &str = "example";
-    const CONFIG_FILES: &[&str] = &["example-cmdline.yml"];
-
-    type Param = CmdlineMode;
-    type GetArgError = ExampleGetArgsError;
     type CreateSealError = Infallible;
+    type GetArgError = ExampleGetArgsError;
+    type Param = CmdlineMode;
+
+    const CONFIG_FILES: &[&str] = &["example-cmdline.yml"];
+    const NAME: &str = "example";
 
     fn get_msg(
         &self,
         param: Self::Param
-    ) -> (Uuid, Version, u64, TestPayload, XactEffects<u128, TestEffects>) {
+    ) -> (
+        Uuid,
+        Version,
+        u64,
+        TestPayload,
+        XactEffects<u128, TestEffects>
+    ) {
         let uuid =
             Uuid::new_v5(&Uuid::NAMESPACE_DNS, EXAMPLE_SERVICE_NAME.as_bytes());
         let (payload, effects) = param.req();
@@ -114,9 +118,7 @@ impl OneShot<u128, TestPayload, TestEffects, TestSeal> for ExampleCmdLine {
     }
 
     #[cfg(feature = "standalone")]
-    fn get_arg(
-        args: ArgMatches
-    ) -> Result<Self::Param, Self::GetArgError> {
+    fn get_arg(args: ArgMatches) -> Result<Self::Param, Self::GetArgError> {
         match args.subcommand() {
             Some(("none", args)) => {
                 let error = args.get_flag("fail");
@@ -157,64 +159,72 @@ impl OneShot<u128, TestPayload, TestEffects, TestSeal> for ExampleCmdLine {
     }
 
     fn cmdargs(cmd: Command) -> Command {
-        cmd
-            .subcommand_required(true)
-            .subcommands([
-                Command::new("none")
-                    .about("Command with no effects set")
-                    .args([
-                        Arg::new("fail")
-                            .long("fail")
-                            .help("have the transaction fail")
-                            .action(ArgAction::SetTrue),
-                        Arg::new("violate")
-                            .long("violate")
-                            .help("have the transaction violate the \
-                                   effect constraints")
-                            .action(ArgAction::SetTrue)
-                    ]),
-                Command::new("empty")
-                    .about("Command with an empty effects set")
-                    .args([
-                        Arg::new("fail")
-                            .long("fail")
-                            .help("have the transaction fail")
-                            .action(ArgAction::SetTrue),
-                        Arg::new("violate")
-                            .long("violate")
-                            .help("have the transaction violate the \
-                                   effect constraints")
-                            .action(ArgAction::SetTrue),
-                        Arg::new("hard")
-                            .long("hard")
-                            .help("have the transaction generate hard \
-                                   effect constraints")
-                            .action(ArgAction::SetTrue)
-                    ]),
-                Command::new("effects")
-                    .about("Command with an effects set")
-                    .args([
-                        Arg::new("fail")
-                            .long("fail")
-                            .help("have the transaction fail")
-                            .action(ArgAction::SetTrue),
-                        Arg::new("violate")
-                            .long("violate")
-                            .help("have the transaction violate the \
-                                   effect constraints")
-                            .action(ArgAction::SetTrue),
-                        Arg::new("hard")
-                            .long("hard")
-                            .help("have the transaction generate hard \
-                                   effect constraints")
-                            .action(ArgAction::SetTrue)
-                    ]),
-            ])
+        cmd.subcommand_required(true).subcommands([
+            Command::new("none")
+                .about("Command with no effects set")
+                .args([
+                    Arg::new("fail")
+                        .long("fail")
+                        .help("have the transaction fail")
+                        .action(ArgAction::SetTrue),
+                    Arg::new("violate")
+                        .long("violate")
+                        .help(
+                            "have the transaction violate the \
+                                   effect constraints"
+                        )
+                        .action(ArgAction::SetTrue)
+                ]),
+            Command::new("empty")
+                .about("Command with an empty effects set")
+                .args([
+                    Arg::new("fail")
+                        .long("fail")
+                        .help("have the transaction fail")
+                        .action(ArgAction::SetTrue),
+                    Arg::new("violate")
+                        .long("violate")
+                        .help(
+                            "have the transaction violate the \
+                                   effect constraints"
+                        )
+                        .action(ArgAction::SetTrue),
+                    Arg::new("hard")
+                        .long("hard")
+                        .help(
+                            "have the transaction generate hard \
+                                   effect constraints"
+                        )
+                        .action(ArgAction::SetTrue)
+                ]),
+            Command::new("effects")
+                .about("Command with an effects set")
+                .args([
+                    Arg::new("fail")
+                        .long("fail")
+                        .help("have the transaction fail")
+                        .action(ArgAction::SetTrue),
+                    Arg::new("violate")
+                        .long("violate")
+                        .help(
+                            "have the transaction violate the \
+                                   effect constraints"
+                        )
+                        .action(ArgAction::SetTrue),
+                    Arg::new("hard")
+                        .long("hard")
+                        .help(
+                            "have the transaction generate hard \
+                                   effect constraints"
+                        )
+                        .action(ArgAction::SetTrue)
+                ])
+        ])
     }
 }
 
 impl CmdlineMode {
-    fn req(&self,) -> (TestPayload, XactEffects<u128, TestEffects>) {
+    fn req(&self) -> (TestPayload, XactEffects<u128, TestEffects>) {
         match self {
             CmdlineMode::NoEffects {
                 hard,
@@ -222,22 +232,14 @@ impl CmdlineMode {
                 error
             } => {
                 let res = if *error {
-                    Err(TestError {
-                        err: String::from("test error")
-                    })
+                    Err(TestError::new(String::from("test error")))
                 } else {
-                    Ok(TestResult { val: vec![0x10] })
+                    Ok(TestResult::new(vec![0x10]))
                 };
                 let payload = if *correct {
-                    TestPayload {
-                        effects: vec![],
-                        res: res
-                    }
+                    TestPayload::new(vec![], res)
                 } else {
-                    TestPayload {
-                        effects: vec![0x01],
-                        res: res
-                    }
+                    TestPayload::new(vec![0x01], res)
                 };
                 let effects = if *hard {
                     XactEffects::HardNone { when: None }
@@ -253,27 +255,17 @@ impl CmdlineMode {
                 error
             } => {
                 let res = if *error {
-                    Err(TestError {
-                        err: String::from("test error")
-                    })
+                    Err(TestError::new(String::from("test error")))
                 } else {
-                    Ok(TestResult { val: vec![0x10] })
+                    Ok(TestResult::new(vec![0x10]))
                 };
                 let payload = if *correct {
-                    TestPayload {
-                        effects: vec![0x01],
-                        res: res
-                    }
+                    TestPayload::new(vec![0x01], res)
                 } else {
-                    TestPayload {
-                        effects: vec![0x02],
-                        res: res
-                    }
+                    TestPayload::new(vec![0x02], res)
                 };
                 let effects = XactEffects::Effects {
-                    effects: TestEffects {
-                        effects: vec![0x01]
-                    },
+                    effects: TestEffects::new(vec![0x01]),
                     hard: *hard
                 };
 
@@ -281,25 +273,17 @@ impl CmdlineMode {
             }
             CmdlineMode::SoftEmptyEffects { correct, error } => {
                 let res = if *error {
-                    Err(TestError {
-                        err: String::from("test error")
-                    })
+                    Err(TestError::new(String::from("test error")))
                 } else {
-                    Ok(TestResult { val: vec![0x10] })
+                    Ok(TestResult::new(vec![0x10]))
                 };
                 let payload = if *correct {
-                    TestPayload {
-                        effects: vec![0x01],
-                        res: res
-                    }
+                    TestPayload::new(vec![0x01], res)
                 } else {
-                    TestPayload {
-                        effects: vec![0x02],
-                        res: res
-                    }
+                    TestPayload::new(vec![0x02], res)
                 };
                 let effects = XactEffects::Effects {
-                    effects: TestEffects { effects: vec![] },
+                    effects: TestEffects::new(vec![]),
                     hard: false
                 };
 
@@ -315,10 +299,10 @@ impl Display for ExampleGetArgsError {
         f: &mut Formatter<'_>
     ) -> Result<(), Error> {
         match self {
-            ExampleGetArgsError::BadCmd { cmd } =>
-                write!(f, "bad effects specifier: {}", cmd),
-            ExampleGetArgsError::NoCmd =>
-                write!(f, "no effects specified")
+            ExampleGetArgsError::BadCmd { cmd } => {
+                write!(f, "bad effects specifier: {}", cmd)
+            }
+            ExampleGetArgsError::NoCmd => write!(f, "no effects specified")
         }
     }
 }

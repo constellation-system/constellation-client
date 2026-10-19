@@ -27,8 +27,8 @@ use constellation_common::codec::Encoder;
 use constellation_common::config::Create;
 use constellation_common::hashid::HashAlgo;
 use constellation_common::hashid::HashID;
-use constellation_component_common::xact::XactHashBatch;
 use constellation_component_common::xact::XactBatch;
+use constellation_component_common::xact::XactHashBatch;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -39,10 +39,10 @@ pub mod unicast;
 pub trait ClientComponentTypes {
     type RoundID: Clone + Display + From<u128> + Into<u128> + Send;
     type MsgPrin: Clone + Debug + Display + Eq + Hash;
-    type Hash: Clone + Default
+    type Hash: Clone
+        + Default
         + HashAlgo<HashID = Self::HashID>
-        + Create<Config = Self::HashConfig,
-                 CreateError = Self::HashCreateError>
+        + Create<Config = Self::HashConfig, CreateError = Self::HashCreateError>
         + Send;
     type HashConfig: Default + for<'a> Deserialize<'a> + Serialize;
     type HashCreateError: Debug + Display;
@@ -52,29 +52,48 @@ pub trait ClientComponentTypes {
     type Effect: Clone + Display + Send;
     type Result: Clone + Display + Send;
     type Error: Clone + Display + Send;
-    type SealCodec: Create<Config = Self::SealCodecConfig,
-                           CreateError = Self::SealCodecCreateError>
-        + Encoder<Self::Seal> + Decoder<Self::Seal>;
+    type SealCodec: Create<
+            Config = Self::SealCodecConfig,
+            CreateError = Self::SealCodecCreateError
+        > + Encoder<Self::Seal>
+        + Decoder<Self::Seal>;
     type SealCodecConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize;
     type SealCodecCreateError: Debug + Display;
-    type PayloadCodec: Create<Config = Self::PayloadCodecConfig,
-                              CreateError = Self::PayloadCodecCreateError>
-        + Encoder<Self::Payload> + Decoder<Self::Payload>;
-    type PayloadCodecConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize;
+    type PayloadCodec: Create<
+            Config = Self::PayloadCodecConfig,
+            CreateError = Self::PayloadCodecCreateError
+        > + Encoder<Self::Payload>
+        + Decoder<Self::Payload>;
+    type PayloadCodecConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize;
     type PayloadCodecCreateError: Debug + Display;
-    type EffectCodec: Create<Config = Self::EffectCodecConfig,
-                             CreateError = Self::EffectCodecCreateError>
-        + Encoder<Self::Effect> + Decoder<Self::Effect>;
-    type EffectCodecConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize;
+    type EffectCodec: Create<
+            Config = Self::EffectCodecConfig,
+            CreateError = Self::EffectCodecCreateError
+        > + Encoder<Self::Effect>
+        + Decoder<Self::Effect>;
+    type EffectCodecConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize;
     type EffectCodecCreateError: Debug + Display;
-    type ResultCodec: Create<Config = Self::ResultCodecConfig,
-                             CreateError = Self::ResultCodecCreateError>
-        + Encoder<Self::Result> + Decoder<Self::Result>;
-    type ResultCodecConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize;
+    type ResultCodec: Create<
+            Config = Self::ResultCodecConfig,
+            CreateError = Self::ResultCodecCreateError
+        > + Encoder<Self::Result>
+        + Decoder<Self::Result>;
+    type ResultCodecConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize;
     type ResultCodecCreateError: Debug + Display;
-    type ErrorCodec: Create<Config = Self::ErrorCodecConfig,
-                            CreateError = Self::ErrorCodecCreateError>
-        + Encoder<Self::Error> + Decoder<Self::Error>;
+    type ErrorCodec: Create<
+            Config = Self::ErrorCodecConfig,
+            CreateError = Self::ErrorCodecCreateError
+        > + Encoder<Self::Error>
+        + Decoder<Self::Error>;
     type ErrorCodecConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize;
     type ErrorCodecCreateError: Debug + Display;
     type AuthNMsg: AuthNed<Self::MsgPrin>
@@ -95,10 +114,10 @@ pub trait ClientComponentTypes {
 pub trait HashClientComponentTypes {
     type RoundID: Clone + Display + From<u128> + Into<u128> + Send;
     type MsgPrin: Clone + Debug + Display + Eq + Hash;
-    type Hash: Clone + Default
+    type Hash: Clone
+        + Default
         + HashAlgo<HashID = Self::HashID>
-        + Create<Config = Self::HashConfig,
-                 CreateError = Self::HashCreateError>
+        + Create<Config = Self::HashConfig, CreateError = Self::HashCreateError>
         + Send;
     type HashConfig: Default + for<'a> Deserialize<'a> + Serialize;
     type HashCreateError: Debug + Display;
@@ -108,29 +127,48 @@ pub trait HashClientComponentTypes {
     type Effect: Clone + Display + Send;
     type Result: Clone + Display + Send;
     type Error: Clone + Display + Send;
-    type SealCodec: Create<Config = Self::SealCodecConfig,
-                           CreateError = Self::SealCodecCreateError>
-        + Encoder<Self::Seal> + Decoder<Self::Seal>;
+    type SealCodec: Create<
+            Config = Self::SealCodecConfig,
+            CreateError = Self::SealCodecCreateError
+        > + Encoder<Self::Seal>
+        + Decoder<Self::Seal>;
     type SealCodecConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize;
     type SealCodecCreateError: Debug + Display;
-    type PayloadCodec: Create<Config = Self::PayloadCodecConfig,
-                              CreateError = Self::PayloadCodecCreateError>
-        + Encoder<Self::Payload> + Decoder<Self::Payload>;
-    type PayloadCodecConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize;
+    type PayloadCodec: Create<
+            Config = Self::PayloadCodecConfig,
+            CreateError = Self::PayloadCodecCreateError
+        > + Encoder<Self::Payload>
+        + Decoder<Self::Payload>;
+    type PayloadCodecConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize;
     type PayloadCodecCreateError: Debug + Display;
-    type EffectCodec: Create<Config = Self::EffectCodecConfig,
-                             CreateError = Self::EffectCodecCreateError>
-        + Encoder<Self::Effect> + Decoder<Self::Effect>;
-    type EffectCodecConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize;
+    type EffectCodec: Create<
+            Config = Self::EffectCodecConfig,
+            CreateError = Self::EffectCodecCreateError
+        > + Encoder<Self::Effect>
+        + Decoder<Self::Effect>;
+    type EffectCodecConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize;
     type EffectCodecCreateError: Debug + Display;
-    type ResultCodec: Create<Config = Self::ResultCodecConfig,
-                             CreateError = Self::ResultCodecCreateError>
-        + Encoder<Self::Result> + Decoder<Self::Result>;
-    type ResultCodecConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize;
+    type ResultCodec: Create<
+            Config = Self::ResultCodecConfig,
+            CreateError = Self::ResultCodecCreateError
+        > + Encoder<Self::Result>
+        + Decoder<Self::Result>;
+    type ResultCodecConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize;
     type ResultCodecCreateError: Debug + Display;
-    type ErrorCodec: Create<Config = Self::ErrorCodecConfig,
-                            CreateError = Self::ErrorCodecCreateError>
-        + Encoder<Self::Error> + Decoder<Self::Error>;
+    type ErrorCodec: Create<
+            Config = Self::ErrorCodecConfig,
+            CreateError = Self::ErrorCodecCreateError
+        > + Encoder<Self::Error>
+        + Decoder<Self::Error>;
     type ErrorCodecConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize;
     type ErrorCodecCreateError: Debug + Display;
     type AuthNMsg: AuthNed<Self::MsgPrin>

@@ -20,15 +20,13 @@ use constellation_channels::resolve::cache::NSNameCachesCtx;
 use constellation_channels::resolve::cache::ThreadedNSNameCaches;
 
 pub struct StandaloneCtx {
-    caches: ThreadedNSNameCaches,
+    caches: ThreadedNSNameCaches
 }
 
 impl StandaloneCtx {
     #[inline]
     pub fn new(caches: ThreadedNSNameCaches) -> StandaloneCtx {
-        StandaloneCtx {
-            caches: caches
-        }
+        StandaloneCtx { caches: caches }
     }
 }
 

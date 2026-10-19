@@ -41,14 +41,15 @@ use log::info;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::component::HashClientComponentTypes;
 use crate::component::ClientComponentTypes;
+use crate::component::HashClientComponentTypes;
 use crate::config::UnicastClientConfig;
 use crate::session::ClientSessionCleanup;
 use crate::session::UnicastClientSession;
 
 pub trait UnicastClientComponentTypes<Types>
-where Types: ClientComponentTypes {
+where
+    Types: ClientComponentTypes {
     type IDsConfig: Default + for<'a> Deserialize<'a> + Serialize;
     type IDsCreateError: Debug + Display;
     type ResolverConfig: Default + for<'a> Deserialize<'a> + Serialize;
@@ -152,7 +153,8 @@ where Types: ClientComponentTypes {
 }
 
 pub trait HashUnicastClientComponentTypes<Types>
-where Types: HashClientComponentTypes {
+where
+    Types: HashClientComponentTypes {
     type IDsConfig: Default + for<'a> Deserialize<'a> + Serialize;
     type IDsCreateError: Debug + Display;
     type ResolverConfig: Default + for<'a> Deserialize<'a> + Serialize;
@@ -255,18 +257,26 @@ where Types: HashClientComponentTypes {
         > + Send;
 }
 
-pub struct SimpleUnicastClientComponentTypes<ClientTypes, BusTypes, Session, Ctx>
-where Ctx: 'static + NSNameCachesCtx + Send
-{
+pub struct SimpleUnicastClientComponentTypes<
+    ClientTypes,
+    BusTypes,
+    Session,
+    Ctx
+> where
+    Ctx: 'static + NSNameCachesCtx + Send {
     client_types: PhantomData<ClientTypes>,
     bus_types: PhantomData<BusTypes>,
     session: PhantomData<Session>,
     ctx: PhantomData<Ctx>
 }
 
-pub struct SimpleHashUnicastClientComponentTypes<ClientTypes, BusTypes, Session, Ctx>
-where Ctx: 'static + NSNameCachesCtx + Send
-{
+pub struct SimpleHashUnicastClientComponentTypes<
+    ClientTypes,
+    BusTypes,
+    Session,
+    Ctx
+> where
+    Ctx: 'static + NSNameCachesCtx + Send {
     client_types: PhantomData<ClientTypes>,
     bus_types: PhantomData<BusTypes>,
     session: PhantomData<Session>,
@@ -377,66 +387,66 @@ impl<ClientTypes, BusTypes, Session, Ctx>
 where
     ClientTypes: ClientComponentTypes,
     BusTypes: UnicastLargeObjBusTypes<
-        Ctx,
-        MsgPrin = ClientTypes::MsgPrin,
-        AuthNMsg = ClientTypes::AuthNMsg,
-        HashConfig = ClientTypes::HashConfig,
-        HashCreateError = ClientTypes::HashCreateError,
-        DecoderConfig = XactBatchCodecConfig<
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig
-        >,
-        DecoderCreateError = XactBatchCodecCreateError<
-            XactSealedCodecCreateError<
-                ClientTypes::SealCodecCreateError,
-                XactReqCodecCreateError<
-                    ClientTypes::PayloadCodecCreateError,
-                    ClientTypes::EffectCodecCreateError
+            Ctx,
+            MsgPrin = ClientTypes::MsgPrin,
+            AuthNMsg = ClientTypes::AuthNMsg,
+            HashConfig = ClientTypes::HashConfig,
+            HashCreateError = ClientTypes::HashCreateError,
+            DecoderConfig = XactBatchCodecConfig<
+                ClientTypes::SealCodecConfig,
+                ClientTypes::PayloadCodecConfig,
+                ClientTypes::EffectCodecConfig,
+                ClientTypes::ResultCodecConfig,
+                ClientTypes::ErrorCodecConfig
+            >,
+            DecoderCreateError = XactBatchCodecCreateError<
+                XactSealedCodecCreateError<
+                    ClientTypes::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        ClientTypes::PayloadCodecCreateError,
+                        ClientTypes::EffectCodecCreateError
+                    >
+                >,
+                XactCommittedRoundCodecCreateError<
+                    ClientTypes::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        ClientTypes::PayloadCodecCreateError,
+                        ClientTypes::EffectCodecCreateError
+                    >
+                >,
+                XactNotifyCodecCreateError<
+                    ClientTypes::ResultCodecCreateError,
+                    ClientTypes::ErrorCodecCreateError
                 >
             >,
-            XactCommittedRoundCodecCreateError<
-                ClientTypes::SealCodecCreateError,
-                XactReqCodecCreateError<
-                    ClientTypes::PayloadCodecCreateError,
-                    ClientTypes::EffectCodecCreateError
-                >
+            EncoderConfig = XactBatchCodecConfig<
+                ClientTypes::SealCodecConfig,
+                ClientTypes::PayloadCodecConfig,
+                ClientTypes::EffectCodecConfig,
+                ClientTypes::ResultCodecConfig,
+                ClientTypes::ErrorCodecConfig
             >,
-            XactNotifyCodecCreateError<
-                ClientTypes::ResultCodecCreateError,
-                ClientTypes::ErrorCodecCreateError
+            EncoderCreateError = XactBatchCodecCreateError<
+                XactSealedCodecCreateError<
+                    ClientTypes::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        ClientTypes::PayloadCodecCreateError,
+                        ClientTypes::EffectCodecCreateError
+                    >
+                >,
+                XactCommittedRoundCodecCreateError<
+                    ClientTypes::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        ClientTypes::PayloadCodecCreateError,
+                        ClientTypes::EffectCodecCreateError
+                    >
+                >,
+                XactNotifyCodecCreateError<
+                    ClientTypes::ResultCodecCreateError,
+                    ClientTypes::ErrorCodecCreateError
+                >
             >
-        >,
-        EncoderConfig = XactBatchCodecConfig<
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig
-        >,
-        EncoderCreateError = XactBatchCodecCreateError<
-            XactSealedCodecCreateError<
-                ClientTypes::SealCodecCreateError,
-                XactReqCodecCreateError<
-                    ClientTypes::PayloadCodecCreateError,
-                    ClientTypes::EffectCodecCreateError
-                >
-            >,
-            XactCommittedRoundCodecCreateError<
-                ClientTypes::SealCodecCreateError,
-                XactReqCodecCreateError<
-                    ClientTypes::PayloadCodecCreateError,
-                    ClientTypes::EffectCodecCreateError
-                >
-            >,
-            XactNotifyCodecCreateError<
-                ClientTypes::ResultCodecCreateError,
-                ClientTypes::ErrorCodecCreateError
-            >
-        >,
-    > + Send,
+        > + Send,
     BusTypes::SessionPrin: for<'a> Deserialize<'a> + Serialize,
     BusTypes::IDsConfig: for<'a> Deserialize<'a> + Serialize,
     BusTypes::ResolverConfig: for<'a> Deserialize<'a> + Serialize,
@@ -448,102 +458,103 @@ where
     BusTypes::UDPConfig: for<'a> Deserialize<'a> + Serialize,
     BusTypes::Msgs: 'static,
     BusTypes::Recv: 'static,
-    Session: UnicastClientSession<
-        BusTypes::Recv,
-        BusTypes::Msgs,
-    >,
+    Session: UnicastClientSession<BusTypes::Recv, BusTypes::Msgs>,
     Session::Config: for<'a> Deserialize<'a> + Serialize,
     Ctx: 'static + NSNameCachesCtx + Send
 {
+    type BusTypes = BusTypes;
+    type Ctx = Ctx;
+    type EpochsConfig = BusTypes::EpochsConfig;
     type IDsConfig = BusTypes::IDsConfig;
     type IDsCreateError = BusTypes::IDsCreateError;
-    type ResolverConfig = BusTypes::ResolverConfig;
-    type EpochsConfig = BusTypes::EpochsConfig;
-    type SessionAuthConfig = BusTypes::SessionAuthConfig;
-    type MsgAuthConfig = BusTypes::MsgAuthConfig;
     type LargeObjMsgAuthConfig = BusTypes::LargeObjMsgAuthConfig;
-    type UnixConfig = BusTypes::UnixConfig;
-    type UDPConfig = BusTypes::UDPConfig;
+    type MsgAuthConfig = BusTypes::MsgAuthConfig;
     type MsgAuthCreateError = BusTypes::MsgAuthCreateError;
     type Msgs = BusTypes::Msgs;
     type Recv = BusTypes::Recv;
-    type Ctx = Ctx;
-    type SessionParam = Session::Param;
-    type SessionConfig = Session::Config;
-    type SessionCleanup = Session::Cleanup;
-    type SessionCreateError = Session::CreateError;
-    type SessionStartError = Session::StartError;
+    type ResolverConfig = BusTypes::ResolverConfig;
     type Session = Session;
-    type BusTypes = BusTypes;
+    type SessionAuthConfig = BusTypes::SessionAuthConfig;
+    type SessionCleanup = Session::Cleanup;
+    type SessionConfig = Session::Config;
+    type SessionCreateError = Session::CreateError;
+    type SessionParam = Session::Param;
+    type SessionStartError = Session::StartError;
+    type UDPConfig = BusTypes::UDPConfig;
+    type UnixConfig = BusTypes::UnixConfig;
 }
 
 impl<ClientTypes, BusTypes, Session, Ctx>
     HashUnicastClientComponentTypes<ClientTypes>
-    for SimpleHashUnicastClientComponentTypes<ClientTypes, BusTypes,
-                                              Session, Ctx>
+    for SimpleHashUnicastClientComponentTypes<
+        ClientTypes,
+        BusTypes,
+        Session,
+        Ctx
+    >
 where
     ClientTypes: HashClientComponentTypes,
     BusTypes: UnicastLargeObjBusTypes<
-        Ctx,
-        MsgPrin = ClientTypes::MsgPrin,
-        AuthNMsg = ClientTypes::AuthNMsg,
-        HashConfig = ClientTypes::HashConfig,
-        HashCreateError = ClientTypes::HashCreateError,
-        DecoderConfig = XactBatchCodecConfig<
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig
-        >,
-        DecoderCreateError = XactBatchCodecCreateError<
-            XactSealedCodecCreateError<
-                ClientTypes::SealCodecCreateError,
-                XactReqCodecCreateError<
-                    ClientTypes::PayloadCodecCreateError,
-                    ClientTypes::EffectCodecCreateError
+            Ctx,
+            MsgPrin = ClientTypes::MsgPrin,
+            AuthNMsg = ClientTypes::AuthNMsg,
+            HashConfig = ClientTypes::HashConfig,
+            HashCreateError = ClientTypes::HashCreateError,
+            DecoderConfig = XactBatchCodecConfig<
+                ClientTypes::SealCodecConfig,
+                ClientTypes::PayloadCodecConfig,
+                ClientTypes::EffectCodecConfig,
+                ClientTypes::ResultCodecConfig,
+                ClientTypes::ErrorCodecConfig
+            >,
+            DecoderCreateError = XactBatchCodecCreateError<
+                XactSealedCodecCreateError<
+                    ClientTypes::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        ClientTypes::PayloadCodecCreateError,
+                        ClientTypes::EffectCodecCreateError
+                    >
+                >,
+                XactCommittedRoundCodecCreateError<
+                    ClientTypes::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        ClientTypes::PayloadCodecCreateError,
+                        ClientTypes::EffectCodecCreateError
+                    >
+                >,
+                XactNotifyCodecCreateError<
+                    ClientTypes::ResultCodecCreateError,
+                    ClientTypes::ErrorCodecCreateError
                 >
             >,
-            XactCommittedRoundCodecCreateError<
-                ClientTypes::SealCodecCreateError,
-                XactReqCodecCreateError<
-                    ClientTypes::PayloadCodecCreateError,
-                    ClientTypes::EffectCodecCreateError
-                >
+            EncoderConfig = XactBatchCodecConfig<
+                ClientTypes::SealCodecConfig,
+                ClientTypes::PayloadCodecConfig,
+                ClientTypes::EffectCodecConfig,
+                ClientTypes::ResultCodecConfig,
+                ClientTypes::ErrorCodecConfig
             >,
-            XactNotifyCodecCreateError<
-                ClientTypes::ResultCodecCreateError,
-                ClientTypes::ErrorCodecCreateError
+            EncoderCreateError = XactBatchCodecCreateError<
+                XactSealedCodecCreateError<
+                    ClientTypes::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        ClientTypes::PayloadCodecCreateError,
+                        ClientTypes::EffectCodecCreateError
+                    >
+                >,
+                XactCommittedRoundCodecCreateError<
+                    ClientTypes::SealCodecCreateError,
+                    XactReqCodecCreateError<
+                        ClientTypes::PayloadCodecCreateError,
+                        ClientTypes::EffectCodecCreateError
+                    >
+                >,
+                XactNotifyCodecCreateError<
+                    ClientTypes::ResultCodecCreateError,
+                    ClientTypes::ErrorCodecCreateError
+                >
             >
-        >,
-        EncoderConfig = XactBatchCodecConfig<
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig
-        >,
-        EncoderCreateError = XactBatchCodecCreateError<
-            XactSealedCodecCreateError<
-                ClientTypes::SealCodecCreateError,
-                XactReqCodecCreateError<
-                    ClientTypes::PayloadCodecCreateError,
-                    ClientTypes::EffectCodecCreateError
-                >
-            >,
-            XactCommittedRoundCodecCreateError<
-                ClientTypes::SealCodecCreateError,
-                XactReqCodecCreateError<
-                    ClientTypes::PayloadCodecCreateError,
-                    ClientTypes::EffectCodecCreateError
-                >
-            >,
-            XactNotifyCodecCreateError<
-                ClientTypes::ResultCodecCreateError,
-                ClientTypes::ErrorCodecCreateError
-            >
-        >,
-    > + Send,
+        > + Send,
     BusTypes::SessionPrin: for<'a> Deserialize<'a> + Serialize,
     BusTypes::IDsConfig: for<'a> Deserialize<'a> + Serialize,
     BusTypes::ResolverConfig: for<'a> Deserialize<'a> + Serialize,
@@ -555,33 +566,30 @@ where
     BusTypes::UDPConfig: for<'a> Deserialize<'a> + Serialize,
     BusTypes::Msgs: 'static,
     BusTypes::Recv: 'static,
-    Session: UnicastClientSession<
-        BusTypes::Recv,
-        BusTypes::Msgs,
-    >,
+    Session: UnicastClientSession<BusTypes::Recv, BusTypes::Msgs>,
     Session::Config: for<'a> Deserialize<'a> + Serialize,
     Ctx: 'static + NSNameCachesCtx + Send
 {
+    type BusTypes = BusTypes;
+    type Ctx = Ctx;
+    type EpochsConfig = BusTypes::EpochsConfig;
     type IDsConfig = BusTypes::IDsConfig;
     type IDsCreateError = BusTypes::IDsCreateError;
-    type ResolverConfig = BusTypes::ResolverConfig;
-    type EpochsConfig = BusTypes::EpochsConfig;
-    type SessionAuthConfig = BusTypes::SessionAuthConfig;
-    type MsgAuthConfig = BusTypes::MsgAuthConfig;
     type LargeObjMsgAuthConfig = BusTypes::LargeObjMsgAuthConfig;
-    type UnixConfig = BusTypes::UnixConfig;
-    type UDPConfig = BusTypes::UDPConfig;
+    type MsgAuthConfig = BusTypes::MsgAuthConfig;
     type MsgAuthCreateError = BusTypes::MsgAuthCreateError;
     type Msgs = BusTypes::Msgs;
     type Recv = BusTypes::Recv;
-    type Ctx = Ctx;
-    type SessionParam = Session::Param;
-    type SessionConfig = Session::Config;
-    type SessionCleanup = Session::Cleanup;
-    type SessionCreateError = Session::CreateError;
-    type SessionStartError = Session::StartError;
+    type ResolverConfig = BusTypes::ResolverConfig;
     type Session = Session;
-    type BusTypes = BusTypes;
+    type SessionAuthConfig = BusTypes::SessionAuthConfig;
+    type SessionCleanup = Session::Cleanup;
+    type SessionConfig = Session::Config;
+    type SessionCreateError = Session::CreateError;
+    type SessionParam = Session::Param;
+    type SessionStartError = Session::StartError;
+    type UDPConfig = BusTypes::UDPConfig;
+    type UnixConfig = BusTypes::UnixConfig;
 }
 
 impl<Ctx, Param> UnicastClientParam<Ctx, Param> {

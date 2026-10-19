@@ -561,7 +561,7 @@ where
     ) -> Self {
         OneShotClientConfig {
             client: client,
-            name_caches: name_caches,
+            name_caches: name_caches
         }
     }
 
@@ -597,7 +597,7 @@ impl<App> OneShotConfig<App> {
     #[inline]
     pub fn new(
         app: App,
-        resubmit: Retry,
+        resubmit: Retry
     ) -> Self {
         OneShotConfig {
             resubmit: resubmit,
@@ -606,13 +606,10 @@ impl<App> OneShotConfig<App> {
     }
 
     #[inline]
-    pub fn take(
-        self
-    ) -> (App, Retry) {
+    pub fn take(self) -> (App, Retry) {
         (self.app, self.resubmit)
     }
 }
-
 
 impl<
     Session,
@@ -684,7 +681,7 @@ where
     ) -> Self {
         ProcessorClientConfig {
             client: client,
-            name_caches: name_caches,
+            name_caches: name_caches
         }
     }
 
@@ -719,11 +716,11 @@ impl<Proc> ProcessorConfig<Proc> {
     #[inline]
     pub fn new(
         proc: Proc,
-        resubmit: Retry,
+        resubmit: Retry
     ) -> Self {
         ProcessorConfig {
             proc: proc,
-            resubmit: resubmit,
+            resubmit: resubmit
         }
     }
 

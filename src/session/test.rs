@@ -16,7 +16,6 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
-
 use crate::component::test::TestBusTypes;
 use crate::component::test::TestClientComponentTypes;
 use crate::component::test::TestHashBusTypes;
@@ -28,19 +27,17 @@ use crate::session::processor::ProcessorSessionRecv;
 #[cfg(feature = "standalone")]
 use crate::standalone::StandaloneCtx;
 
-type TestOneShotBusTypes<Ctx> =
-    TestBusTypes<
-        OneShotSessionMsgs<TestClientComponentTypes>,
-        OneShotSessionRecv<TestClientComponentTypes>,
-        Ctx
-    >;
+type TestOneShotBusTypes<Ctx> = TestBusTypes<
+    OneShotSessionMsgs<TestClientComponentTypes>,
+    OneShotSessionRecv<TestClientComponentTypes>,
+    Ctx
+>;
 
-type TestProcessorBusTypes<Proc, Ctx> =
-    TestHashBusTypes<
-        ProcessorSessionMsgs<TestHashClientComponentTypes, Proc>,
-        ProcessorSessionRecv<TestHashClientComponentTypes, Proc>,
-        Ctx
-    >;
+type TestProcessorBusTypes<Proc, Ctx> = TestHashBusTypes<
+    ProcessorSessionMsgs<TestHashClientComponentTypes, Proc>,
+    ProcessorSessionRecv<TestHashClientComponentTypes, Proc>,
+    Ctx
+>;
 
 #[cfg(feature = "standalone")]
 pub type StandaloneTestOneShotBusTypes = TestOneShotBusTypes<StandaloneCtx>;
