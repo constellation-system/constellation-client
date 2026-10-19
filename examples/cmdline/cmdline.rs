@@ -17,84 +17,39 @@
 // <https://www.gnu.org/licenses/>.
 
 use std::convert::Infallible;
-use std::convert::TryFrom;
 use std::fmt::Display;
 use std::fmt::Error;
 use std::fmt::Formatter;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::RwLock;
-use std::thread::JoinHandle;
-use std::time::Instant;
 
 use clap::Arg;
 use clap::ArgAction;
 use clap::ArgMatches;
 use clap::Command;
-use constellation_auth::authn::AuthNMsgRecv;
-use constellation_auth::authn::PassthruMsgAuthN;
-use constellation_auth::authn::TestAuthN;
-use constellation_channels::config::CompoundFarEndpoint;
-use constellation_channels::far::compound::CompoundFarChannel;
-use constellation_channels::far::compound::CompoundFarChannelThreadedFlows;
-use constellation_channels::far::compound::CompoundFarChannelXfrm;
-use constellation_channels::far::flows::ThreadedFlowsListener;
-use constellation_channels::far::registry::CompoundFarChannelRegistry;
-use constellation_channels::far::registry::FarChannelRegistryCtx;
-use constellation_channels::far::registry::FarChannelRegistryID;
-use constellation_channels::far::udp::UDPDatagramXfrm;
-use constellation_channels::far::unix::UnixDatagramXfrm;
-use constellation_channels::resolve::cache::NSNameCachesCtx;
-use constellation_channels::resolve::cache::ThreadedNSNameCaches;
-use constellation_channels::unix::UnixSocketAddr;
-use constellation_client::component::multicast::CompoundMulticastClientComponent;
-use constellation_client::component::multicast::MulticastClientComponent;
-use constellation_client::component::multicast::TestCred;
-use constellation_client::session::ClientSessionCleanup;
-use constellation_client::session::MulticastClientSession;
-use constellation_common::codec::Codec;
-use constellation_common::error::ErrorScope;
-use constellation_common::error::MutexPoison;
-use constellation_common::error::ScopedError;
-use constellation_common::error::WithMutexPoison;
-use constellation_common::hashid::SHA3Algo;
-use constellation_common::hashid::SHA3ID;
-use constellation_common::ids::AscendingCount;
-use constellation_common::net::IPEndpointAddr;
-use constellation_common::retry::Retry;
-use constellation_common::shutdown::ShutdownFlag;
-use constellation_common::sync::Notify;
-use constellation_common::version::FullVersion;
+use constellation_client::component::test::TestClientComponentTypes;
+use constellation_client::session::oneshot::OneShot;
+use constellation_client::session::oneshot::SimpleStandaloneOneShot;
+use constellation_client::session::test::StandaloneTestOneShotBusTypes;
+use constellation_common::config::Create;
 use constellation_common::version::Version;
-use constellation_common::version::VersionSuffix;
-use constellation_component_common::PartyStreamIdx;
-use constellation_component_common::config::PartiesConfig;
-use constellation_component_common::xact::XactBatch;
-use constellation_component_common::xact::XactBatchCodec;
 use constellation_component_common::xact::XactEffects;
-use constellation_component_common::xact::XactNotifyState;
-use constellation_component_common::xact::XactSealed;
 use constellation_component_common::xact::XactUncommittedReq;
-use constellation_standalone::Standalone;
-use constellation_standalone::StandaloneApp;
-use constellation_streams::config::LargeObjProtoConfig;
-use constellation_streams::frags::Frags;
-use constellation_streams::frags::OutboundFrags;
-use constellation_streams::large_obj::LargeObjID;
-use constellation_streams::large_obj::LargeObjMsgs;
-use constellation_streams::large_obj::LargeObjProto;
-use constellation_streams::large_obj::LargeObjProtoAddOutboundError;
-use constellation_streams::large_obj::LargeObjProtoCreateError;
-use constellation_streams::large_obj::LargeObjSender;
-use constellation_streams::multicast::StreamMulticasterFrags;
-use log::debug;
-use log::error;
-use log::info;
-use log::warn;
+use constellation_component_common::xact::test::TestEffects;
+use constellation_component_common::xact::test::TestError;
+use constellation_component_common::xact::test::TestPayload;
+use constellation_component_common::xact::test::TestResult;
+use constellation_component_common::xact::test::TestSeal;
 use uuid::Uuid;
 
-use crate::config::CmdlineConfig;
+pub struct ExampleCmdLine;
+
+pub type StandaloneExampleCmdLine = SimpleStandaloneOneShot<
+        TestClientComponentTypes,
+        StandaloneTestOneShotBusTypes,
+        ExampleCmdLine
+    >;
+
+const EXAMPLE_SERVICE_NAME: &str = "org.constellation.example";
+const EXAMPLE_VERSION: Version = Version::new(0, 0, 0);
 
 #[derive(Clone)]
 pub enum CmdlineMode {
@@ -114,137 +69,152 @@ pub enum CmdlineMode {
     }
 }
 
-pub struct CmdlineSession {
-    parties: Arc<RwLock<Vec<PartyStreamIdx>>>
+#[derive(Debug)]
+pub enum ExampleGetArgsError {
+    BadCmd {
+        cmd: String
+    },
+    NoCmd
 }
 
-pub struct CmdlineMsgState {
-    version: Version,
-    when: Instant,
-    uuid: Uuid,
-    nretries: usize
+impl Create for ExampleCmdLine {
+    type Config = ();
+    type CreateError = Infallible;
+
+    #[inline]
+    fn create(_config: ()) -> Result<Self, Self::CreateError> {
+        Ok(ExampleCmdLine)
+    }
 }
 
-pub struct CmdlineState {
-    msg: Mutex<Option<CmdlineMsgState>>,
-    resubmit: Retry,
-    retry: Retry
-}
+impl OneShot<u128, TestPayload, TestEffects, TestSeal> for ExampleCmdLine {
+    const NAME: &str = "example";
+    const CONFIG_FILES: &[&str] = &["example-cmdline.yml"];
 
-pub struct CmdlineArgs {
-    mode: CmdlineMode,
-    resubmit: Retry,
-    retry: Retry
-}
+    type Param = CmdlineMode;
+    type GetArgError = ExampleGetArgsError;
+    type CreateSealError = Infallible;
 
-impl CmdlineState {
-    fn get_batch(
+    fn get_msg(
         &self,
-        mode: &CmdlineMode
-    ) -> Result<(Option<TestBatch>, Option<Instant>), MutexPoison> {
-        if let Some(msg) = &mut *self.msg.lock().map_err(|_| MutexPoison)? {
-            let now = Instant::now();
+        param: Self::Param
+    ) -> (Uuid, Version, u64, TestPayload, XactEffects<u128, TestEffects>) {
+        let uuid =
+            Uuid::new_v5(&Uuid::NAMESPACE_DNS, EXAMPLE_SERVICE_NAME.as_bytes());
+        let (payload, effects) = param.req();
 
-            if now >= msg.when {
-                debug!(target: "cmdline-msgs",
-                       "generating outgoing batch");
+        (uuid, EXAMPLE_VERSION.clone(), 0, payload, effects)
+    }
 
-                let req = mode.req(&msg.uuid, &msg.version);
-                let sealed = XactSealed::new(TestSeal, req);
-                let batch = XactBatch::new(vec![], vec![sealed], vec![]);
-                let duration = self.resubmit.retry_delay(msg.nretries);
-                let when = now + duration;
+    fn create_seal(
+        &self,
+        _req: &XactUncommittedReq<u128, TestPayload, TestEffects>
+    ) -> Result<TestSeal, Self::CreateSealError> {
+        Ok(TestSeal)
+    }
 
-                msg.when = when;
-                msg.nretries += 1;
+    #[cfg(feature = "standalone")]
+    fn get_arg(
+        args: ArgMatches
+    ) -> Result<Self::Param, Self::GetArgError> {
+        match args.subcommand() {
+            Some(("none", args)) => {
+                let error = args.get_flag("fail");
+                let correct = !args.get_flag("violate");
 
-                Ok((Some(batch), Some(when)))
-            } else {
-                Ok((None, Some(msg.when)))
+                Ok(CmdlineMode::SoftEmptyEffects {
+                    correct: correct,
+                    error: error
+                })
             }
-        } else {
-            Ok((None, None))
+            Some(("empty", args)) => {
+                let hard = args.get_flag("hard");
+                let error = args.get_flag("fail");
+                let correct = !args.get_flag("violate");
+
+                Ok(CmdlineMode::NoEffects {
+                    correct: correct,
+                    error: error,
+                    hard: hard
+                })
+            }
+            Some(("effects", args)) => {
+                let hard = args.get_flag("hard");
+                let error = args.get_flag("fail");
+                let correct = !args.get_flag("violate");
+
+                Ok(CmdlineMode::Effects {
+                    correct: correct,
+                    error: error,
+                    hard: hard
+                })
+            }
+            Some((cmd, _)) => Err(ExampleGetArgsError::BadCmd {
+                cmd: cmd.to_string()
+            }),
+            None => Err(ExampleGetArgsError::NoCmd)
         }
     }
 
-    fn notify(&self) -> Result<Option<Instant>, MutexPoison> {
-        if let Some(msg) = &mut *self.msg.lock().map_err(|_| MutexPoison)? {
-            let now = Instant::now();
-            let duration = self.resubmit.retry_delay(msg.nretries);
-            let when = now + duration;
-
-            msg.when = when;
-
-            Ok(Some(when))
-        } else {
-            Ok(None)
-        }
+    fn cmdargs(cmd: Command) -> Command {
+        cmd
+            .subcommand_required(true)
+            .subcommands([
+                Command::new("none")
+                    .about("Command with no effects set")
+                    .args([
+                        Arg::new("fail")
+                            .long("fail")
+                            .help("have the transaction fail")
+                            .action(ArgAction::SetTrue),
+                        Arg::new("violate")
+                            .long("violate")
+                            .help("have the transaction violate the \
+                                   effect constraints")
+                            .action(ArgAction::SetTrue)
+                    ]),
+                Command::new("empty")
+                    .about("Command with an empty effects set")
+                    .args([
+                        Arg::new("fail")
+                            .long("fail")
+                            .help("have the transaction fail")
+                            .action(ArgAction::SetTrue),
+                        Arg::new("violate")
+                            .long("violate")
+                            .help("have the transaction violate the \
+                                   effect constraints")
+                            .action(ArgAction::SetTrue),
+                        Arg::new("hard")
+                            .long("hard")
+                            .help("have the transaction generate hard \
+                                   effect constraints")
+                            .action(ArgAction::SetTrue)
+                    ]),
+                Command::new("effects")
+                    .about("Command with an effects set")
+                    .args([
+                        Arg::new("fail")
+                            .long("fail")
+                            .help("have the transaction fail")
+                            .action(ArgAction::SetTrue),
+                        Arg::new("violate")
+                            .long("violate")
+                            .help("have the transaction violate the \
+                                   effect constraints")
+                            .action(ArgAction::SetTrue),
+                        Arg::new("hard")
+                            .long("hard")
+                            .help("have the transaction generate hard \
+                                   effect constraints")
+                            .action(ArgAction::SetTrue)
+                    ]),
+            ])
     }
-
-    fn complete(&self) -> Result<(), MutexPoison> {
-        *self.msg.lock().map_err(|_| MutexPoison)? = None;
-
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
-pub struct CmdlineSessionMsgs {
-    state: Arc<CmdlineState>,
-    mode: CmdlineMode
-}
-
-#[derive(Clone)]
-pub struct CmdlineSessionRecv {
-    state: Arc<CmdlineState>
-}
-
-#[derive(Clone)]
-pub struct CmdlineSessionCleanup;
-
-pub enum CmdlineSessionError {
-    SkippedIdx
-}
-
-pub struct StandaloneCreateCleanup {
-    shutdown: ShutdownFlag,
-    caches_join: JoinHandle<()>
-}
-
-pub type StandaloneRegistry = CompoundFarChannelRegistry<
-    Arc<TestAuthN<String, TestCred>>,
-    UnixDatagramXfrm,
-    UDPDatagramXfrm,
-    FarChannelRegistryID
->;
-
-pub struct StandaloneCtx {
-    caches: ThreadedNSNameCaches,
-    registry: Arc<StandaloneRegistry>
-}
-
-pub struct StandaloneCmdline {
-    component: CompoundMulticastClientComponent<
-        TestBatch,
-        TestBatch,
-        PassthruMsgAuthN<TestBatch, String>,
-        TestBatchCodec,
-        SHA3Algo,
-        AscendingCount<LargeObjID>,
-        CmdlineSessionMsgs,
-        CmdlineSessionRecv,
-        CmdlineSession,
-        AscendingCount<u128>,
-        StandaloneCtx
-    >
 }
 
 impl CmdlineMode {
-    fn req(
-        &self,
-        uuid: &Uuid,
-        version: &Version
-    ) -> XactUncommittedReq<u128, TestPayload, TestEffects> {
+    fn req(&self,) -> (TestPayload, XactEffects<u128, TestEffects>) {
         match self {
             CmdlineMode::NoEffects {
                 hard,
@@ -275,13 +245,7 @@ impl CmdlineMode {
                     XactEffects::SoftNone
                 };
 
-                XactUncommittedReq::new(
-                    uuid.clone(),
-                    version.clone(),
-                    0,
-                    payload,
-                    effects
-                )
+                (payload, effects)
             }
             CmdlineMode::Effects {
                 hard,
@@ -313,13 +277,7 @@ impl CmdlineMode {
                     hard: *hard
                 };
 
-                XactUncommittedReq::new(
-                    uuid.clone(),
-                    version.clone(),
-                    0,
-                    payload,
-                    effects
-                )
+                (payload, effects)
             }
             CmdlineMode::SoftEmptyEffects { correct, error } => {
                 let res = if *error {
@@ -345,901 +303,22 @@ impl CmdlineMode {
                     hard: false
                 };
 
-                XactUncommittedReq::new(
-                    uuid.clone(),
-                    version.clone(),
-                    0,
-                    payload,
-                    effects
-                )
+                (payload, effects)
             }
         }
     }
 }
 
-impl CmdlineMsgState {
-    #[inline]
-    fn new() -> Self {
-        let uuid =
-            Uuid::new_v5(&Uuid::NAMESPACE_DNS, TEST_SERVICE_NAME.as_bytes());
-
-        debug!(target: "cmdline-msgs",
-               "service UUID: {}",
-               uuid);
-
-        CmdlineMsgState {
-            when: Instant::now(),
-            nretries: 0,
-            version: TEST_VERSION,
-            uuid: uuid
-        }
-    }
-}
-
-impl CmdlineState {
-    #[inline]
-    fn new(
-        retry: Retry,
-        resubmit: Retry
-    ) -> Self {
-        let msg = Mutex::new(Some(CmdlineMsgState::new()));
-
-        CmdlineState {
-            msg: msg,
-            retry: retry,
-            resubmit: resubmit
-        }
-    }
-}
-
-impl CmdlineSession {
-    #[inline]
-    fn new() -> Self {
-        CmdlineSession {
-            parties: Arc::new(RwLock::new(Vec::new()))
-        }
-    }
-}
-
-impl NSNameCachesCtx for StandaloneCtx {
-    /// Exact type of name caches.
-    type NameCaches = ThreadedNSNameCaches;
-
-    #[inline]
-    fn name_caches(&mut self) -> &mut Self::NameCaches {
-        &mut self.caches
-    }
-}
-
-impl
-    FarChannelRegistryCtx<
-        CompoundFarChannel,
-        CompoundFarChannelThreadedFlows<
-            Arc<TestAuthN<String, TestCred>>,
-            UnixDatagramXfrm,
-            UDPDatagramXfrm,
-            FarChannelRegistryID
-        >,
-        Arc<TestAuthN<String, TestCred>>,
-        CompoundFarChannelXfrm<UnixDatagramXfrm, UDPDatagramXfrm>
-    > for StandaloneCtx
-{
-    #[inline]
-    fn far_channel_registry(&mut self) -> Arc<StandaloneRegistry> {
-        self.registry.clone()
-    }
-}
-
-impl LargeObjMsgs<SHA3Algo, TestBatch> for CmdlineSessionMsgs {
-    type AddMsgsError<Encode>
-        = WithMutexPoison<LargeObjProtoAddOutboundError<Encode>>
-    where
-        Encode: Display + ScopedError;
-
-    fn add_msgs<WrapperCodec, F>(
-        &mut self,
-        sender: &mut LargeObjSender<SHA3Algo, TestBatch, WrapperCodec, F>
-    ) -> Result<Option<Instant>, Self::AddMsgsError<WrapperCodec::EncodeError>>
-    where
-        WrapperCodec: Clone + Codec<TestBatch>,
-        WrapperCodec::Param: Default,
-        F: Frags {
-        let (batch, when) = self
-            .state
-            .get_batch(&self.mode)
-            .map_err(|_| WithMutexPoison::MutexPoison)?;
-
-        if let Some(batch) = batch {
-            sender
-                .add_outbound(&batch)
-                .map_err(|err| WithMutexPoison::Inner { error: err })?;
-        }
-
-        Ok(when)
-    }
-}
-
-impl AuthNMsgRecv<String, TestBatch> for CmdlineSessionRecv {
-    type RecvError = MutexPoison;
-
-    fn recv_auth_msg(
-        &mut self,
-        _prin: &String,
-        msg: TestBatch
-    ) -> Result<(), Self::RecvError> {
-        for _ in msg.uncommitted() {
-            warn!(target: "cmdline-recv",
-                  "discarding uncommitted request")
-        }
-
-        for _ in msg.committed() {
-            warn!(target: "cmdline-recv",
-                  "discarding committed round")
-        }
-
-        for notify in msg.notifies() {
-            match notify.state() {
-                XactNotifyState::Success { .. } |
-                XactNotifyState::Error { .. } => {
-                    self.state.complete()?;
-                }
-                _ => {
-                    self.state.notify()?;
-                }
-            }
-
-            info!(target: "cmdline-recv",
-                  "notification for {}: {}",
-                  notify.hash(), notify.state())
-        }
-
-        Ok(())
-    }
-}
-
-impl
-    MulticastClientSession<
-        SHA3Algo,
-        TestBatch,
-        TestBatch,
-        PassthruMsgAuthN<TestBatch, String>,
-        TestBatchCodec,
-        AscendingCount<LargeObjID>,
-        CmdlineSessionMsgs,
-        CmdlineSessionRecv
-    > for CmdlineSession
-{
-    type Args = CmdlineArgs;
-    type Cleanup = CmdlineSessionCleanup;
-    type Config = LargeObjProtoConfig<((), (), (), (), ()), ()>;
-    type CreateError = LargeObjProtoCreateError<
-        <TestBatchCodec as Codec<TestBatch>>::CreateError
-    >;
-    type StartError = MutexPoison;
-
-    fn create(
-        args: CmdlineArgs,
-        config: Self::Config
-    ) -> Result<
-        (
-            Self,
-            Notify,
-            LargeObjProto<
-                SHA3Algo,
-                TestBatch,
-                TestBatch,
-                PassthruMsgAuthN<TestBatch, String>,
-                PartyStreamIdx,
-                TestBatchCodec,
-                AscendingCount<LargeObjID>,
-                CmdlineSessionMsgs,
-                CmdlineSessionRecv,
-                StreamMulticasterFrags<PartyStreamIdx, OutboundFrags>
-            >
-        ),
-        Self::CreateError
-    > {
-        let CmdlineArgs {
-            mode,
-            retry,
-            resubmit
-        } = args;
-        let state = Arc::new(CmdlineState::new(retry, resubmit));
-        let hash = SHA3Algo::default();
-        let authn = PassthruMsgAuthN::default();
-        let msgs = CmdlineSessionMsgs {
-            state: state.clone(),
-            mode: mode
-        };
-        let recv = CmdlineSessionRecv {
-            state: state.clone()
-        };
-        let notify = Notify::new();
-        let proto = LargeObjProto::create(
-            config,
-            notify.clone(),
-            recv,
-            msgs,
-            authn,
-            hash
-        )?;
-        let session = CmdlineSession::new();
-
-        Ok((session, notify, proto))
-    }
-
-    fn start<I>(
-        self,
-        parties: I
-    ) -> Result<Self::Cleanup, Self::StartError>
-    where
-        I: Iterator<Item = (PartyStreamIdx, String)> {
-        let mut guard = self.parties.write().map_err(|_| MutexPoison)?;
-
-        *guard = parties.map(|(idx, _)| idx).collect();
-
-        Ok(CmdlineSessionCleanup)
-    }
-}
-
-impl ClientSessionCleanup for CmdlineSessionCleanup {
-    fn cleanup(self) {}
-}
-
-impl Standalone for StandaloneCmdline {
-    type Config = CmdlineConfig;
-    type CreateCleanup = StandaloneCreateCleanup;
-
-    const CONFIG_FILES: &[&str] = &["cmdline.conf"];
-    const NAME: &str = "cmdline";
-    const VERSION: FullVersion = FullVersion::new(
-        None,
-        Version::new(0, 0, 0),
-        Some(VersionSuffix::Development)
-    );
-
-    fn create(
-        mut args: ArgMatches,
-        config: Self::Config
-    ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
-        let (
-            name_caches_config,
-            registry_config,
-            client_config,
-            session_config,
-            retry,
-            resubmit
-        ) = config.take();
-        let shutdown = ShutdownFlag::new();
-        let (mut caches, caches_join) =
-            ThreadedNSNameCaches::create(name_caches_config, shutdown.clone());
-        let cleanup = StandaloneCreateCleanup {
-            shutdown: shutdown.clone(),
-            caches_join: caches_join
-        };
-        let hard = args.get_count("hard") != 0;
-        let error = args.get_count("fail") != 0;
-        let correct = args.get_count("violate") == 0;
-        let (listener, reporter) = ThreadedFlowsListener::new();
-
-        // ISSUE #6: This part is temporary, until we get a real
-        // authenticator.
-        let multicast_config = client_config.multicast();
-        let parties_config = multicast_config.parties();
-        let authn_parties = match parties_config {
-            PartiesConfig::Static { stat } => {
-                let mut authn_parties = Vec::with_capacity(stat.len());
-
-                for party in stat {
-                    let id = party.party();
-
-                    for conn in party.party_config().connections() {
-                        for endpoint in conn.endpoints() {
-                            match endpoint {
-                                CompoundFarEndpoint::Unix { unix_datagram } => {
-                                    match UnixSocketAddr::try_from(
-                                        unix_datagram
-                                    ) {
-                                        Ok(addr) => {
-                                            let cred =
-                                                TestCred::Unix { addr: addr };
-
-                                            authn_parties
-                                                .push((cred, id.clone()));
-                                        }
-                                        Err(err) => {
-                                            warn!(target: "start",
-                                              "error converting path: {}",
-                                              err);
-                                        }
-                                    }
-                                }
-                                CompoundFarEndpoint::UDP { udp } => match udp
-                                    .ip_endpoint()
-                                {
-                                    IPEndpointAddr::Addr(addr) => {
-                                        let addr =
-                                            SocketAddr::new(*addr, udp.port());
-                                        let cred = TestCred::IP { addr: addr };
-
-                                        authn_parties.push((cred, id.clone()));
-                                    }
-                                    IPEndpointAddr::Name(name) => {
-                                        warn!(target: "start",
-                                               "discarding endpoint {}",
-                                               name);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                authn_parties
-            }
-        };
-
-        let authn =
-            Arc::new(TestAuthN::from_parties(authn_parties.into_iter()));
-
-        match StandaloneRegistry::create(
-            &mut caches,
-            authn,
-            reporter,
-            registry_config
-        ) {
-            Ok(registry) => {
-                let ctx = StandaloneCtx {
-                    registry: Arc::new(registry),
-                    caches: caches
-                };
-
-                match args.remove_one::<String>("effects") {
-                    Some(string) => match string.as_str() {
-                        "none" => {
-                            let mode = CmdlineMode::NoEffects {
-                                correct: correct,
-                                error: error,
-                                hard: hard
-                            };
-                            let args = CmdlineArgs {
-                                mode: mode,
-                                retry: retry,
-                                resubmit: resubmit
-                            };
-                            let component = MulticastClientComponent::create(
-                                client_config,
-                                args,
-                                session_config,
-                                listener,
-                                shutdown,
-                                ctx
-                            );
-                            let standalone = StandaloneCmdline {
-                                component: component
-                            };
-
-                            Ok((standalone, cleanup))
-                        }
-                        "empty" => {
-                            let mode = CmdlineMode::SoftEmptyEffects {
-                                correct: correct,
-                                error: error
-                            };
-                            let args = CmdlineArgs {
-                                mode: mode,
-                                retry: retry,
-                                resubmit: resubmit
-                            };
-                            let component = MulticastClientComponent::create(
-                                client_config,
-                                args,
-                                session_config,
-                                listener,
-                                shutdown,
-                                ctx
-                            );
-                            let standalone = StandaloneCmdline {
-                                component: component
-                            };
-
-                            Ok((standalone, cleanup))
-                        }
-                        "effects" => {
-                            let mode = CmdlineMode::Effects {
-                                correct: correct,
-                                error: error,
-                                hard: hard
-                            };
-                            let args = CmdlineArgs {
-                                mode: mode,
-                                retry: retry,
-                                resubmit: resubmit
-                            };
-                            let component = MulticastClientComponent::create(
-                                client_config,
-                                args,
-                                session_config,
-                                listener,
-                                shutdown,
-                                ctx
-                            );
-                            let standalone = StandaloneCmdline {
-                                component: component
-                            };
-
-                            Ok((standalone, cleanup))
-                        }
-                        effects => {
-                            error!(target: "start",
-                                   "invalid effects on command line: \"{}\"",
-                                   effects);
-
-                            Err(cleanup)
-                        }
-                    },
-                    None => {
-                        error!(target: "start",
-                               "no effects given on command line");
-
-                        Err(cleanup)
-                    }
-                }
-            }
-            Err(err) => {
-                error!(target: "start",
-                       "error creating channel registry: {}",
-                       err);
-
-                Err(cleanup)
-            }
-        }
-    }
-
-    fn cmdargs(cmd: Command) -> Command {
-        cmd.arg(
-            Arg::new("effects")
-                .value_parser(["none", "empty", "effects"])
-                .help("type of effects to send")
-                .required(true)
-        )
-        .arg(
-            Arg::new("fail")
-                .long("fail")
-                .help("have the transaction fail")
-                .action(ArgAction::Count)
-        )
-        .arg(
-            Arg::new("violate")
-                .long("violate")
-                .help("have the transaction violate the effect constraints")
-                .action(ArgAction::Count)
-        )
-        .arg(
-            Arg::new("hard")
-                .long("hard")
-                .help("have the transaction generate hard effect constraints")
-                .action(ArgAction::Count)
-        )
-    }
-}
-
-impl StandaloneApp for StandaloneCmdline {
-    type RunErrorCleanup = ();
-
-    fn run(
-        self,
-        _shutdown: ShutdownFlag
-    ) -> Result<(), Self::RunErrorCleanup> {
-        info!(target: "example",
-              "starting example");
-
-        let cleanup = self.component.start().map_err(|err| {
-            error!(target: "example",
-                       "error starting comonent: {}",
-                       err);
-
-            ()
-        })?;
-
-        cleanup.cleanup();
-
-        Ok(())
-    }
-
-    fn cleanup(_create: Self::CreateCleanup) {}
-
-    fn cleanup_err(
-        create: Self::CreateCleanup,
-        _run: Self::RunErrorCleanup
-    ) {
-        let StandaloneCreateCleanup { caches_join, .. } = create;
-
-        if let Err(_) = caches_join.join() {
-            error!(target: "example",
-                   "error joining caches");
-        }
-    }
-}
-
-impl Display for CmdlineSessionError {
+impl Display for ExampleGetArgsError {
     fn fmt(
         &self,
         f: &mut Formatter<'_>
     ) -> Result<(), Error> {
         match self {
-            CmdlineSessionError::SkippedIdx => {
-                write!(f, "stream parties skipped an index")
-            }
+            ExampleGetArgsError::BadCmd { cmd } =>
+                write!(f, "bad effects specifier: {}", cmd),
+            ExampleGetArgsError::NoCmd =>
+                write!(f, "no effects specified")
         }
-    }
-}
-
-const TEST_SERVICE_NAME: &str = "org.constellation.test";
-const TEST_VERSION: Version = Version::new(0, 0, 0);
-
-#[derive(Clone, Debug)]
-pub struct TestEffects {
-    effects: Vec<u8>
-}
-
-#[derive(Clone, Debug)]
-pub struct TestPayload {
-    effects: Vec<u8>,
-    res: Result<TestResult, TestError>
-}
-
-#[derive(Clone, Debug)]
-pub struct TestResult {
-    val: Vec<u8>
-}
-
-#[derive(Clone, Debug)]
-pub struct TestError {
-    err: String
-}
-
-#[derive(Clone, Debug)]
-pub struct TestSeal;
-
-#[derive(Clone)]
-pub struct TestEffectsCodec;
-
-#[derive(Clone)]
-pub struct TestPayloadCodec;
-
-#[derive(Clone)]
-pub struct TestResultCodec;
-
-#[derive(Clone)]
-pub struct TestErrorCodec;
-
-#[derive(Clone)]
-pub struct TestSealCodec;
-
-pub struct TestStringError;
-
-type TestBatch = XactBatch<
-    u128,
-    SHA3ID,
-    TestSeal,
-    TestPayload,
-    TestEffects,
-    TestResult,
-    TestError
->;
-type TestBatchCodec = XactBatchCodec<
-    u128,
-    SHA3Algo,
-    TestSeal,
-    TestPayload,
-    TestEffects,
-    TestResult,
-    TestError,
-    TestSealCodec,
-    TestPayloadCodec,
-    TestEffectsCodec,
-    TestResultCodec,
-    TestErrorCodec
->;
-
-impl Codec<TestSeal> for TestSealCodec {
-    type CreateError = Infallible;
-    type DecodeError = Infallible;
-    type EncodeError = Infallible;
-    type Param = ();
-
-    #[inline]
-    fn create(_param: ()) -> Result<Self, Infallible> {
-        Ok(TestSealCodec)
-    }
-
-    #[inline]
-    fn buf_size(
-        &self,
-        _val: &TestSeal
-    ) -> usize {
-        0
-    }
-
-    #[inline]
-    fn encode(
-        &mut self,
-        _val: &TestSeal,
-        _buf: &mut [u8]
-    ) -> Result<usize, Self::EncodeError> {
-        Ok(0)
-    }
-
-    #[inline]
-    fn decode(
-        &mut self,
-        _buf: &[u8]
-    ) -> Result<(TestSeal, usize), Self::DecodeError> {
-        Ok((TestSeal, 0))
-    }
-}
-
-impl Codec<TestEffects> for TestEffectsCodec {
-    type CreateError = Infallible;
-    type DecodeError = Infallible;
-    type EncodeError = Infallible;
-    type Param = ();
-
-    #[inline]
-    fn create(_param: ()) -> Result<Self, Infallible> {
-        Ok(TestEffectsCodec)
-    }
-
-    #[inline]
-    fn buf_size(
-        &self,
-        val: &TestEffects
-    ) -> usize {
-        val.effects.len() + 1
-    }
-
-    #[inline]
-    fn encode(
-        &mut self,
-        val: &TestEffects,
-        buf: &mut [u8]
-    ) -> Result<usize, Self::EncodeError> {
-        let len = val.effects.len();
-
-        buf[0] = len as u8;
-        buf[1..len + 1].copy_from_slice(&val.effects[..]);
-
-        Ok(len + 1)
-    }
-
-    #[inline]
-    fn decode(
-        &mut self,
-        buf: &[u8]
-    ) -> Result<(TestEffects, usize), Self::DecodeError> {
-        let len = buf[0] as usize;
-        let effects = buf[1..len + 1].to_vec();
-
-        Ok((TestEffects { effects: effects }, len + 1))
-    }
-}
-
-impl Codec<TestResult> for TestResultCodec {
-    type CreateError = Infallible;
-    type DecodeError = Infallible;
-    type EncodeError = Infallible;
-    type Param = ();
-
-    #[inline]
-    fn create(_param: ()) -> Result<Self, Infallible> {
-        Ok(TestResultCodec)
-    }
-
-    #[inline]
-    fn buf_size(
-        &self,
-        val: &TestResult
-    ) -> usize {
-        val.val.len() + 1
-    }
-
-    #[inline]
-    fn encode(
-        &mut self,
-        val: &TestResult,
-        buf: &mut [u8]
-    ) -> Result<usize, Self::EncodeError> {
-        let len = val.val.len();
-
-        buf[0] = len as u8;
-        buf[1..len + 1].copy_from_slice(&val.val[..]);
-
-        Ok(len + 1)
-    }
-
-    #[inline]
-    fn decode(
-        &mut self,
-        buf: &[u8]
-    ) -> Result<(TestResult, usize), Self::DecodeError> {
-        let len = buf[0] as usize;
-        let val = buf[1..len + 1].to_vec();
-
-        Ok((TestResult { val: val }, len + 1))
-    }
-}
-
-impl Codec<TestError> for TestErrorCodec {
-    type CreateError = Infallible;
-    type DecodeError = TestStringError;
-    type EncodeError = Infallible;
-    type Param = ();
-
-    #[inline]
-    fn create(_param: ()) -> Result<Self, Infallible> {
-        Ok(TestErrorCodec)
-    }
-
-    #[inline]
-    fn buf_size(
-        &self,
-        val: &TestError
-    ) -> usize {
-        val.err.as_bytes().len() + 1
-    }
-
-    #[inline]
-    fn encode(
-        &mut self,
-        val: &TestError,
-        buf: &mut [u8]
-    ) -> Result<usize, Self::EncodeError> {
-        let bytes = val.err.as_bytes();
-        let len = bytes.len();
-
-        buf[0] = len as u8;
-        buf[1..len + 1].copy_from_slice(&bytes[..]);
-
-        Ok(len + 1)
-    }
-
-    #[inline]
-    fn decode(
-        &mut self,
-        buf: &[u8]
-    ) -> Result<(TestError, usize), Self::DecodeError> {
-        let len = buf[0] as usize;
-        let val = buf[1..len + 1].to_vec();
-        let err = String::from_utf8(val).map_err(|_| TestStringError)?;
-
-        Ok((TestError { err: err }, len + 1))
-    }
-}
-
-impl Codec<TestPayload> for TestPayloadCodec {
-    type CreateError = Infallible;
-    type DecodeError = <TestErrorCodec as Codec<TestError>>::DecodeError;
-    type EncodeError = Infallible;
-    type Param = ();
-
-    #[inline]
-    fn create(_param: ()) -> Result<Self, Infallible> {
-        Ok(TestPayloadCodec)
-    }
-
-    #[inline]
-    fn buf_size(
-        &self,
-        val: &TestPayload
-    ) -> usize {
-        let effects = val.effects.len() + 1;
-        let result = match &val.res {
-            Ok(res) => TestResultCodec.buf_size(res) + 1,
-            Err(err) => TestErrorCodec.buf_size(err) + 1
-        };
-
-        effects + result
-    }
-
-    #[inline]
-    fn encode(
-        &mut self,
-        val: &TestPayload,
-        buf: &mut [u8]
-    ) -> Result<usize, Self::EncodeError> {
-        let effects_len = val.effects.len();
-
-        buf[0] = effects_len as u8;
-        buf[1..effects_len + 1].copy_from_slice(&val.effects[..]);
-
-        let res_len = match &val.res {
-            Ok(res) => {
-                buf[effects_len + 1] = 0;
-
-                let Ok(len) =
-                    TestResultCodec.encode(res, &mut buf[effects_len + 2..]);
-
-                len + 1
-            }
-            Err(err) => {
-                buf[effects_len + 1] = 1;
-
-                let Ok(len) =
-                    TestErrorCodec.encode(err, &mut buf[effects_len + 2..]);
-
-                len + 1
-            }
-        };
-
-        Ok(effects_len + res_len + 1)
-    }
-
-    #[inline]
-    fn decode(
-        &mut self,
-        buf: &[u8]
-    ) -> Result<(TestPayload, usize), Self::DecodeError> {
-        let effects_len = buf[0] as usize;
-        let effects = buf[1..effects_len + 1].to_vec();
-
-        let (res, res_len) = if buf[effects_len + 1] == 0 {
-            let Ok((res, len)) =
-                TestResultCodec.decode(&buf[effects_len + 2..]);
-
-            (Ok(res), len)
-        } else {
-            let (err, len) = TestErrorCodec.decode(&buf[effects_len + 1..])?;
-
-            (Err(err), len)
-        };
-
-        Ok((
-            TestPayload {
-                effects: effects,
-                res: res
-            },
-            effects_len + res_len + 2
-        ))
-    }
-}
-
-impl ScopedError for TestStringError {
-    #[inline]
-    fn scope(&self) -> ErrorScope {
-        ErrorScope::Unrecoverable
-    }
-}
-
-impl Display for TestResult {
-    fn fmt(
-        &self,
-        f: &mut Formatter<'_>
-    ) -> Result<(), Error> {
-        write!(f, "result: ")?;
-
-        for byte in self.val.iter() {
-            write!(f, "{:02x}", byte)?;
-        }
-
-        Ok(())
-    }
-}
-
-impl Display for TestError {
-    fn fmt(
-        &self,
-        f: &mut Formatter<'_>
-    ) -> Result<(), Error> {
-        write!(f, "{}", self.err)
-    }
-}
-
-impl Display for TestStringError {
-    fn fmt(
-        &self,
-        f: &mut Formatter<'_>
-    ) -> Result<(), Error> {
-        write!(f, "bad UTF-8 data")
     }
 }

@@ -23,6 +23,7 @@ use constellation_streams::multicast::MulticastStreamIdx;
 
 pub mod oneshot;
 pub mod processor;
+pub mod test;
 
 pub trait MulticastClientSession<Prin, Recv, Msgs>: Sized {
     type Config;

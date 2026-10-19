@@ -16,13 +16,12 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
-mod config;
 mod processor;
 
 use constellation_standalone::StandaloneService;
 
-use crate::processor::StandaloneProcessor;
+use crate::processor::StandaloneExampleProcessor;
 
 fn main() {
-    StandaloneProcessor::main()
+    StandaloneExampleProcessor::main()
 }

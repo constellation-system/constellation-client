@@ -17,12 +17,11 @@
 // <https://www.gnu.org/licenses/>.
 
 mod cmdline;
-mod config;
 
 use constellation_standalone::StandaloneApp;
 
-use crate::cmdline::StandaloneCmdline;
+use crate::cmdline::StandaloneExampleCmdLine;
 
 fn main() {
-    StandaloneCmdline::main()
+    StandaloneExampleCmdLine::main()
 }

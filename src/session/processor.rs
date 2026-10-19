@@ -17,6 +17,7 @@
 // <https://www.gnu.org/licenses/>.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::io::Error;
@@ -90,13 +91,13 @@ use uuid::Uuid;
 #[cfg(feature = "standalone")]
 use crate::config::ProcessorClientConfig;
 use crate::config::ProcessorConfig;
-use crate::component::ClientComponentTypes;
+use crate::component::HashClientComponentTypes;
 #[cfg(feature = "standalone")]
-use crate::component::unicast::SimpleUnicastClientComponentTypes;
-use crate::component::unicast::UnicastClientComponentCleanup;
+use crate::component::unicast::SimpleHashUnicastClientComponentTypes;
+use crate::component::unicast::HashUnicastClientComponentCleanup;
 #[cfg(feature = "standalone")]
-use crate::component::unicast::UnicastClientComponent;
-use crate::component::unicast::UnicastClientComponentTypes;
+use crate::component::unicast::HashUnicastClientComponent;
+use crate::component::unicast::HashUnicastClientComponentTypes;
 #[cfg(feature = "standalone")]
 use crate::component::unicast::UnicastClientParam;
 use crate::session::UnicastClientSession;
@@ -106,6 +107,7 @@ use crate::standalone::StandaloneCtx;
 
 pub trait Processor<RoundID, Req, Eff, Res, Err>: Create
 where RoundID: Clone + From<u128> + Into<u128> {
+    const SERVICE_ID: &str;
     const SERVICE_NAME: &str;
     #[cfg(feature = "standalone")]
     const CONFIG_FILES: &[&str];
@@ -128,7 +130,7 @@ where RoundID: Clone + From<u128> + Into<u128> {
 pub struct ProcessorSession<Types, Proc>
 where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                       Types::Result, Types::Error>,
-      Types: ClientComponentTypes {
+      Types: HashClientComponentTypes {
     types: PhantomData<Types>,
     proc: PhantomData<Proc>
 }
@@ -144,7 +146,7 @@ where RoundID: Clone + From<u128> + Into<u128>,
 pub struct ProcessorState<Types, Proc>
 where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                       Types::Result, Types::Error>,
-      Types: ClientComponentTypes {
+      Types: HashClientComponentTypes {
     pending: Mutex<HashMap<Types::HashID,
                            ProcessorNotifyState<Types::RoundID, Types::HashID,
                                                 Types::Result, Types::Error>>>,
@@ -157,7 +159,7 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
 pub struct ProcessorSessionMsgs<Types, Proc>
 where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                       Types::Result, Types::Error>,
-      Types: ClientComponentTypes {
+      Types: HashClientComponentTypes {
     state: Arc<ProcessorState<Types, Proc>>,
     // XXX this is a hack; eventually, we'll send a registration
     // message of some kind.
@@ -168,7 +170,7 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
 pub struct ProcessorSessionRecv<Types, Proc>
 where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                       Types::Result, Types::Error>,
-      Types: ClientComponentTypes {
+      Types: HashClientComponentTypes {
     state: Arc<ProcessorState<Types, Proc>>,
     class: Uuid,
     version: Version,
@@ -182,7 +184,7 @@ pub struct ProcessorParams {
 pub struct ProcessorSessionCleanup;
 
 pub type ProcessorCleanup<ClientTypes, Types> =
-    UnicastClientComponentCleanup<ClientTypes, Types>;
+    HashUnicastClientComponentCleanup<ClientTypes, Types>;
 
 pub enum ProcessorSessionError {
     SkippedIdx
@@ -225,7 +227,7 @@ where RoundID: Clone + From<u128> + Into<u128>,
 impl<Types, Proc> ProcessorState<Types, Proc>
 where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                       Types::Result, Types::Error>,
-      Types: ClientComponentTypes {
+      Types: HashClientComponentTypes {
     fn get_notifies(
         &self
     ) -> Result<
@@ -262,18 +264,16 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
     ) -> Result<(), MutexPoison> {
         let mut guard = self.pending.lock().map_err(|_| MutexPoison)?;
 
-        if !guard.contains_key(&hash) {
+        if let Entry::Vacant(ent) = guard.entry(hash.clone()) {
             trace!(target: "processor-state",
                    "adding notifiction for {}",
                    hash);
 
-            let ent = ProcessorNotifyState {
+            ent.insert(ProcessorNotifyState {
                 when: Instant::now(),
                 nretries: 0,
                 msg: msg
-            };
-
-            guard.insert(hash, ent);
+            });
         } else {
             trace!(target: "processor-state",
                    "notifiction for {} already existed",
@@ -296,7 +296,7 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
 impl<Types, Proc> MsgsSetNotify for ProcessorSessionMsgs<Types, Proc>
 where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                       Types::Result, Types::Error>,
-      Types: ClientComponentTypes {
+      Types: HashClientComponentTypes {
     type Error = MutexPoison;
 
     fn set_notify(
@@ -323,7 +323,7 @@ impl<Types, Proc> LargeObjMsgs<
 > for ProcessorSessionMsgs<Types, Proc>
 where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                       Types::Result, Types::Error>,
-      Types: ClientComponentTypes {
+      Types: HashClientComponentTypes {
     type AddMsgsError<Encode>
         = WithMutexPoison<LargeObjProtoAddOutboundError<Encode>>
     where
@@ -361,7 +361,7 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
         F: Frags {
         let (notifies, when) = self.state.get_notifies()?;
 
-        if self.first || notifies.len() != 0 {
+        if self.first || notifies.is_empty() {
             debug!(target: "processor-session-msgs",
                    "sending {} notifies",
                    notifies.len());
@@ -381,7 +381,7 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
 impl<Types, Proc> ProcessorSessionRecv<Types, Proc>
 where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                       Types::Result, Types::Error>,
-      Types: ClientComponentTypes {
+      Types: HashClientComponentTypes {
     fn run_uncommitted(
         &mut self,
         req: XactSealed<
@@ -631,7 +631,7 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                     match codec.hash_committed(&req) {
                         Ok(hash) => {
                             let hashes = seal.hashes();
-                            let idx = req.idx() as usize;
+                            let idx = req.idx();
 
                             if hashes.len() <= idx && hashes[idx] == hash {
                                 let res = self
@@ -692,7 +692,7 @@ impl<Types, Proc> AuthNMsgRecv<Types::MsgPrin, Types::AuthNMsg>
     for ProcessorSessionRecv<Types, Proc>
 where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                       Types::Result, Types::Error>,
-      Types: ClientComponentTypes {
+      Types: HashClientComponentTypes {
     type RecvError = WithMutexPoison<Error>;
 
     fn recv_auth_msg(
@@ -745,7 +745,7 @@ impl<Types, Proc> UnicastClientSession<ProcessorSessionRecv<Types, Proc>,
     for ProcessorSession<Types, Proc>
 where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
                       Types::Result, Types::Error>,
-      Types: ClientComponentTypes {
+      Types: HashClientComponentTypes {
     type Cleanup = ProcessorSessionCleanup;
     type Config = ProcessorConfig<Proc::Config>;
     type Param = ();
@@ -763,7 +763,7 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
     > {
         let (proc_config, resubmit) = config.take();
         let class =
-            Uuid::new_v5(&Uuid::NAMESPACE_DNS, Proc::SERVICE_NAME.as_bytes());
+            Uuid::new_v5(&Uuid::NAMESPACE_DNS, Proc::SERVICE_ID.as_bytes());
         let version = Version::new(0, 0, 0);
         let proc = Proc::create(proc_config)?;
         let state = ProcessorState {
@@ -799,45 +799,54 @@ where Proc: Processor<Types::RoundID, Types::Payload, Types::Effect,
 
 #[cfg(feature = "standalone")]
 pub struct StandaloneProcessorCreateCleanup {
-    shutdown: ShutdownFlag,
-    caches_join: JoinHandle<()>
+    caches: Option<(ShutdownFlag, JoinHandle<()>)>
 }
 
 #[cfg(feature = "standalone")]
 pub struct StandaloneProcessorRunCleanup<ClientTypes, Types>
 where
-    ClientTypes: ClientComponentTypes,
-    Types: UnicastClientComponentTypes<ClientTypes> {
-    component: UnicastClientComponentCleanup<ClientTypes, Types>
+    ClientTypes: HashClientComponentTypes,
+    Types: HashUnicastClientComponentTypes<ClientTypes> {
+    component: HashUnicastClientComponentCleanup<ClientTypes, Types>
 }
 
 #[cfg(feature = "standalone")]
 pub struct StandaloneProcessor<ClientTypes, Types, Proc>
 where
-    ClientTypes: ClientComponentTypes,
-    Types: UnicastClientComponentTypes<ClientTypes>,
+    ClientTypes: HashClientComponentTypes,
+    Types: HashUnicastClientComponentTypes<
+        ClientTypes,
+        Session = ProcessorSession<ClientTypes, Proc>,
+        SessionParam = (),
+        SessionConfig = ProcessorConfig<Proc::Config>,
+        Ctx = StandaloneCtx
+    >,
     Proc: Processor<ClientTypes::RoundID, ClientTypes::Payload,
                     ClientTypes::Effect, ClientTypes::Result,
                     ClientTypes::Error> {
     proc: PhantomData<Proc>,
-    component: UnicastClientComponent<ClientTypes, Types>
+    component: HashUnicastClientComponent<ClientTypes, Types>
 }
 
 #[cfg(feature = "standalone")]
-type StandaloneMulticastClientComponentTypes<ClientTypes, BusTypes, App> =
-    SimpleUnicastClientComponentTypes<
+pub type SimpleStandaloneProcessor<ClientTypes, BusTypes, Proc> =
+    StandaloneProcessor<
         ClientTypes,
-        BusTypes,
-        ProcessorSession<ClientTypes, App>,
-        StandaloneCtx
+        SimpleHashUnicastClientComponentTypes<
+            ClientTypes,
+            BusTypes,
+            ProcessorSession<ClientTypes, Proc>,
+            StandaloneCtx
+        >,
+        Proc
     >;
 
 #[cfg(feature = "standalone")]
 impl<ClientTypes, Types>
     StandaloneProcessorRunCleanup<ClientTypes, Types>
 where
-    ClientTypes: 'static + ClientComponentTypes,
-    Types: 'static + UnicastClientComponentTypes<ClientTypes> {
+    ClientTypes: 'static + HashClientComponentTypes,
+    Types: 'static + HashUnicastClientComponentTypes<ClientTypes> {
     fn cleanup(self) {
         self.component.cleanup()
     }
@@ -847,8 +856,8 @@ where
 impl<ClientTypes, Types, Proc> Standalone
     for StandaloneProcessor<ClientTypes, Types, Proc>
 where
-    ClientTypes: ClientComponentTypes,
-    Types: UnicastClientComponentTypes<
+    ClientTypes: HashClientComponentTypes,
+    Types: HashUnicastClientComponentTypes<
         ClientTypes,
         Session = ProcessorSession<ClientTypes, Proc>,
         SessionParam = (),
@@ -887,35 +896,42 @@ where
     );
 
     fn create(
-        args: ArgMatches,
+        _args: ArgMatches,
         config: Self::Config
     ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
         let (name_caches_config, client_config) = config.take();
-        let shutdown = ShutdownFlag::new();
-        let (caches, caches_join) =
-            ThreadedNSNameCaches::create(name_caches_config, shutdown.clone());
-        let ctx = StandaloneCtx {
-            caches: caches
-        };
+        let (caches, caches_join, shutdown) =
+            ThreadedNSNameCaches::create(name_caches_config)
+            .map_err(|err| {
+                error!(target: "processor-standalone",
+                       "error creating name caches: {}",
+                       err);
+
+                StandaloneProcessorCreateCleanup { caches: None }
+            })?;
+        let ctx = StandaloneCtx::new(caches);
         let cleanup = StandaloneProcessorCreateCleanup {
-            shutdown: shutdown.clone(),
-            caches_join: caches_join
+            caches: Some((shutdown.clone(), caches_join))
         };
         let param = UnicastClientParam::new((), ctx);
-        let component = UnicastClientComponent::create(client_config, param)
-            .map_err(|err| {
-                error!(target: "one-shot-standalone",
+
+        match HashUnicastClientComponent::create(client_config, param) {
+            Ok(component) => {
+                let out = StandaloneProcessor {
+                    proc: PhantomData,
+                    component: component
+                };
+
+                Ok((out, cleanup))
+            }
+            Err(err) => {
+                error!(target: "processor-standalone",
                        "error creating multicast client: {}",
                        err);
 
-                cleanup
-            })?;
-        let out = StandaloneProcessor {
-            proc: PhantomData,
-            component: component
-        };
-
-        Ok((out, cleanup))
+                Err(cleanup)
+            }
+        }
     }
 }
 
@@ -923,8 +939,8 @@ where
 impl<ClientTypes, Types, Proc> StandaloneService
     for StandaloneProcessor<ClientTypes, Types, Proc>
 where
-    ClientTypes: 'static + ClientComponentTypes,
-    Types: 'static + UnicastClientComponentTypes<
+    ClientTypes: 'static + HashClientComponentTypes,
+    Types: 'static + HashUnicastClientComponentTypes<
         ClientTypes,
         Session = ProcessorSession<ClientTypes, Proc>,
         SessionParam = (),
@@ -962,13 +978,13 @@ where
     }
 
     fn shutdown(
-        mut create_cleanup: Self::CreateCleanup,
+        create_cleanup: Self::CreateCleanup,
         run_cleanup: Option<Self::RunCleanup>
     ) {
+        let StandaloneProcessorCreateCleanup { caches } = create_cleanup;
+
         debug!(target: "processor",
                "cleaning up processor");
-
-        create_cleanup.shutdown.set();
 
         if let Some(cleanup) = run_cleanup {
             debug!(target: "processor",
@@ -980,21 +996,33 @@ where
         debug!(target: "processor",
                "cleaning up caches");
 
-        if create_cleanup.caches_join.join().is_err() {
-            error!(target: "processor",
-                   "error shutting down name chache threads")
+        if let Some((mut shutdown, join)) = caches {
+            if let Err(err) = shutdown.set() {
+                error!(target: "one-shot",
+                       "error setting shutdown flag: {}",
+                       err)
+            } else if join.join().is_err() {
+                error!(target: "one-shot",
+                       "error shutting down name chache threads")
+            }
         }
     }
 
     fn shutdown_err(
-        create: Self::CreateCleanup,
-        _run: Self::RunErrorCleanup
+        create_cleanup: Self::CreateCleanup,
+        _run_cleanup: Self::RunErrorCleanup
     ) {
-        let StandaloneProcessorCreateCleanup { caches_join, .. } = create;
+        let StandaloneProcessorCreateCleanup { caches } = create_cleanup;
 
-        if let Err(_) = caches_join.join() {
-            error!(target: "processor",
-                   "error joining caches");
+        if let Some((mut shutdown, join)) = caches {
+            if let Err(err) = shutdown.set() {
+                error!(target: "one-shot",
+                       "error setting shutdown flag: {}",
+                       err)
+            } else if join.join().is_err() {
+                error!(target: "one-shot",
+                       "error shutting down name chache threads")
+            }
         }
     }
 }

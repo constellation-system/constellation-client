@@ -23,6 +23,15 @@ pub struct StandaloneCtx {
     caches: ThreadedNSNameCaches,
 }
 
+impl StandaloneCtx {
+    #[inline]
+    pub fn new(caches: ThreadedNSNameCaches) -> StandaloneCtx {
+        StandaloneCtx {
+            caches: caches
+        }
+    }
+}
+
 impl NSNameCachesCtx for StandaloneCtx {
     /// Exact type of name caches.
     type NameCaches = ThreadedNSNameCaches;

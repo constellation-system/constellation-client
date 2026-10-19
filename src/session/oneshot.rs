@@ -438,8 +438,7 @@ where Create: Display,
 
 #[cfg(feature = "standalone")]
 pub struct StandaloneOneShotCreateCleanup {
-    shutdown: ShutdownFlag,
-    caches_join: JoinHandle<()>
+    caches: Option<(ShutdownFlag, JoinHandle<()>)>
 }
 
 #[cfg(feature = "standalone")]
@@ -458,6 +457,20 @@ where
     app: PhantomData<App>,
     component: MulticastClientComponent<ClientTypes, Types>
 }
+
+
+#[cfg(feature = "standalone")]
+pub type SimpleStandaloneOneShot<ClientTypes, BusTypes, App> =
+    StandaloneOneShot<
+        ClientTypes,
+        SimpleMulticastClientComponentTypes<
+            ClientTypes,
+            BusTypes,
+            OneShotSession<ClientTypes, App>,
+            StandaloneCtx
+        >,
+        App
+    >;
 
 #[cfg(feature = "standalone")]
 type StandaloneMulticastClientComponentTypes<ClientTypes, BusTypes, App> =
@@ -521,39 +534,50 @@ where
         config: Self::Config
     ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
         let (name_caches_config, client_config) = config.take();
-        let shutdown = ShutdownFlag::new();
-        let (caches, caches_join) =
-            ThreadedNSNameCaches::create(name_caches_config, shutdown.clone());
-        let ctx = StandaloneCtx {
-            caches: caches
-        };
-        let cleanup = StandaloneOneShotCreateCleanup {
-            shutdown: shutdown.clone(),
-            caches_join: caches_join
-        };
-        let arg = App::get_arg(args)
+        let (caches, caches_join, shutdown) =
+            ThreadedNSNameCaches::create(name_caches_config)
             .map_err(|err| {
+                error!(target: "one-shot-standalone",
+                       "error creating name caches: {}",
+                       err);
+
+                StandaloneOneShotCreateCleanup { caches: None }
+            })?;
+        let ctx = StandaloneCtx::new(caches);
+        let cleanup = StandaloneOneShotCreateCleanup {
+            caches: Some((shutdown.clone(), caches_join))
+        };
+
+        match App::get_arg(args) {
+            Ok(arg) => {
+                let param = MulticastClientParam::new(arg, ctx);
+
+                match MulticastClientComponent::create(client_config, param) {
+                    Ok(component) => {
+                        let out = StandaloneOneShot {
+                            app: PhantomData,
+                            component: component
+                        };
+
+                        Ok((out, cleanup))
+                    }
+                    Err(err) => {
+                        error!(target: "one-shot-standalone",
+                               "error creating multicast client: {}",
+                               err);
+
+                        Err(cleanup)
+                    }
+                }
+            }
+            Err(err) => {
                 error!(target: "one-shot-recv",
                        "error parsing application args: {}",
                        err);
 
-                cleanup
-            })?;
-        let param = MulticastClientParam::new(arg, ctx);
-        let component = MulticastClientComponent::create(client_config, param)
-            .map_err(|err| {
-                error!(target: "one-shot-standalone",
-                       "error creating multicast client: {}",
-                       err);
-
-                cleanup
-            })?;
-        let out = StandaloneOneShot {
-            app: PhantomData,
-            component: component
-        };
-
-        Ok((out, cleanup))
+                Err(cleanup)
+            }
+        }
     }
 }
 
@@ -572,7 +596,7 @@ where
     App: OneShot<ClientTypes::RoundID, ClientTypes::Payload,
                  ClientTypes::Effect, ClientTypes::Seal>,
     App::Config: for<'a> Deserialize<'a> + Serialize {
-    type RunErrorCleanup = StandaloneOneShotRunCleanup;
+    type RunErrorCleanup = ();
 
     fn run(self) -> Result<(), Self::RunErrorCleanup> {
         info!(target: "one-shot",
@@ -595,11 +619,17 @@ where
         create: Self::CreateCleanup,
         _run: Self::RunErrorCleanup
     ) {
-        let StandaloneOneShotCreateCleanup { caches_join, .. } = create;
+        let StandaloneOneShotCreateCleanup { caches } = create;
 
-        if let Err(_) = caches_join.join() {
-            error!(target: "one-shot",
-                   "error joining caches");
+        if let Some((mut shutdown, join)) = caches {
+            if let Err(err) = shutdown.set() {
+                error!(target: "one-shot",
+                       "error setting shutdown flag: {}",
+                       err)
+            } else if join.join().is_err() {
+                error!(target: "one-shot",
+                       "error shutting down name chache threads")
+            }
         }
     }
 }
