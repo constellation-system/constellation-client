@@ -1031,11 +1031,12 @@ where
 
     fn create(
         _args: ArgMatches,
-        config: Self::Config
+        config: Self::Config,
+        shutdown: &ShutdownFlag
     ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
         let (name_caches_config, client_config) = config.take();
-        let (caches, caches_join, shutdown) = ThreadedNSNameCaches::create(
-            name_caches_config
+        let (caches, caches_join) = ThreadedNSNameCaches::create(
+            name_caches_config, shutdown.clone()
         )
         .map_err(|err| {
             error!(target: "processor-standalone",
@@ -1099,9 +1100,10 @@ where
 
     fn run(
         self,
-        _rundir: PathBuf
+        _rundir: PathBuf,
+        shutdown: ShutdownFlag
     ) -> Result<Self::RunCleanup, Self::RunErrorCleanup> {
-        match self.component.start() {
+        match self.component.start(shutdown) {
             Ok(cleanup) => {
                 let cleanup =
                     StandaloneProcessorRunCleanup { component: cleanup };
@@ -1117,7 +1119,7 @@ where
         }
     }
 
-    fn shutdown(
+    fn join(
         create_cleanup: Self::CreateCleanup,
         run_cleanup: Option<Self::RunCleanup>
     ) {

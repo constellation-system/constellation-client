@@ -26,6 +26,7 @@ use std::marker::PhantomData;
 use constellation_auth::authn::AuthNMsgRecv;
 use constellation_channels::resolve::cache::NSNameCachesCtx;
 use constellation_common::config::CreateWithParam;
+use constellation_common::shutdown::ShutdownFlag;
 use constellation_component_common::bus::types::UnicastLargeObjBusTypes;
 use constellation_component_common::bus::unicast::UnicastLargeObjBus;
 use constellation_component_common::bus::unicast::UnicastLargeObjBusCreateError;
@@ -727,7 +728,8 @@ where
     Types: 'static + UnicastClientComponentTypes<ClientTypes>
 {
     pub fn start(
-        self
+        self,
+        shutdown: ShutdownFlag
     ) -> Result<
         UnicastClientComponentCleanup<ClientTypes, Types>,
         UnicastClientComponentRunError<
@@ -796,7 +798,13 @@ where
             Types::Session::create(session_config, session_param).map_err(
                 |err| UnicastClientComponentRunError::Session { err: err }
             )?;
-        let unicast = UnicastLargeObjBus::start(config, ctx, recv, msgs)
+        let unicast = UnicastLargeObjBus::start(
+            config,
+            ctx,
+            recv,
+            msgs,
+            shutdown
+        )
             .map_err(|err| UnicastClientComponentRunError::Unicast {
                 err: err
             })?;
@@ -817,7 +825,8 @@ where
     Types: 'static + HashUnicastClientComponentTypes<ClientTypes>
 {
     pub fn start(
-        self
+        self,
+        shutdown: ShutdownFlag
     ) -> Result<
         HashUnicastClientComponentCleanup<ClientTypes, Types>,
         UnicastClientComponentRunError<
@@ -886,7 +895,13 @@ where
             Types::Session::create(session_config, session_param).map_err(
                 |err| UnicastClientComponentRunError::Session { err: err }
             )?;
-        let unicast = UnicastLargeObjBus::start(config, ctx, recv, msgs)
+        let unicast = UnicastLargeObjBus::start(
+            config,
+            ctx,
+            recv,
+            msgs,
+            shutdown
+        )
             .map_err(|err| UnicastClientComponentRunError::Unicast {
                 err: err
             })?;

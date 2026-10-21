@@ -28,6 +28,7 @@ use constellation_auth::authn::AuthNMsgRecv;
 use constellation_channels::resolve::cache::NSNameCachesCtx;
 use constellation_common::config::CreateWithParam;
 use constellation_common::error::MutexPoison;
+use constellation_common::shutdown::ShutdownFlag;
 use constellation_component_common::bus::multicast::MulticastLargeObjBus;
 use constellation_component_common::bus::multicast::MulticastLargeObjBusCreateError;
 use constellation_component_common::bus::types::MulticastLargeObjBusTypes;
@@ -764,7 +765,8 @@ where
     ClientTypes: ClientComponentTypes
 {
     pub fn start(
-        self
+        self,
+        shutdown: ShutdownFlag
     ) -> Result<
         MulticastClientComponentCleanup<ClientTypes, Types>,
         MulticastClientComponentRunError<
@@ -836,7 +838,7 @@ where
                 |err| MulticastClientComponentRunError::Session { err: err }
             )?;
         let (multicast, parties) =
-            MulticastLargeObjBus::start(config, ctx, recv, msgs).map_err(
+            MulticastLargeObjBus::start(config, ctx, recv, msgs, shutdown).map_err(
                 |err| MulticastClientComponentRunError::Multicast { err: err }
             )?;
         let session_cleanup =
@@ -858,7 +860,8 @@ where
     ClientTypes: HashClientComponentTypes
 {
     pub fn start(
-        self
+        self,
+        shutdown: ShutdownFlag
     ) -> Result<
         HashMulticastClientComponentCleanup<ClientTypes, Types>,
         MulticastClientComponentRunError<
@@ -930,7 +933,7 @@ where
                 |err| MulticastClientComponentRunError::Session { err: err }
             )?;
         let (multicast, parties) =
-            MulticastLargeObjBus::start(config, ctx, recv, msgs).map_err(
+            MulticastLargeObjBus::start(config, ctx, recv, msgs, shutdown).map_err(
                 |err| MulticastClientComponentRunError::Multicast { err: err }
             )?;
         let session_cleanup =

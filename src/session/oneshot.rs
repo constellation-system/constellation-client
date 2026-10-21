@@ -562,11 +562,12 @@ where
 
     fn create(
         args: ArgMatches,
-        config: Self::Config
+        config: Self::Config,
+        shutdown: &ShutdownFlag
     ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
         let (name_caches_config, client_config) = config.take();
-        let (caches, caches_join, shutdown) = ThreadedNSNameCaches::create(
-            name_caches_config
+        let (caches, caches_join) = ThreadedNSNameCaches::create(
+            name_caches_config, shutdown.clone()
         )
         .map_err(|err| {
             error!(target: "one-shot-standalone",
@@ -636,11 +637,14 @@ where
 {
     type RunErrorCleanup = ();
 
-    fn run(self) -> Result<(), Self::RunErrorCleanup> {
+    fn run(
+        self,
+        shutdown: ShutdownFlag
+    ) -> Result<(), Self::RunErrorCleanup> {
         info!(target: "one-shot",
               "starting one-shot component");
 
-        let cleanup = self.component.start().map_err(|err| {
+        let cleanup = self.component.start(shutdown).map_err(|err| {
             error!(target: "one-shot",
                        "error starting component: {}",
                        err);
