@@ -16,7 +16,6 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
-use std::convert::Infallible;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -25,12 +24,12 @@ use std::marker::PhantomData;
 
 use constellation_auth::authn::AuthNMsgRecv;
 use constellation_channels::resolve::cache::NSNameCachesCtx;
-use constellation_common::config::CreateWithParam;
 use constellation_common::shutdown::ShutdownFlag;
+use constellation_common::sync::Notify;
 use constellation_component_common::bus::types::UnicastLargeObjBusTypes;
 use constellation_component_common::bus::unicast::UnicastLargeObjBus;
 use constellation_component_common::bus::unicast::UnicastLargeObjBusCreateError;
-use constellation_component_common::config::UnicastLargeObjBusConfig;
+use constellation_component_common::bus::unicast::UnicastLargeObjBusStarter;
 use constellation_component_common::config::XactBatchCodecConfig;
 use constellation_component_common::xact::XactBatchCodecCreateError;
 use constellation_component_common::xact::XactCommittedRoundCodecCreateError;
@@ -53,13 +52,28 @@ where
     Types: ClientComponentTypes {
     type IDsConfig: Default + for<'a> Deserialize<'a> + Serialize;
     type IDsCreateError: Debug + Display;
-    type ResolverConfig: Default + for<'a> Deserialize<'a> + Serialize;
-    type EpochsConfig: Default + for<'a> Deserialize<'a> + Serialize;
-    type SessionAuthConfig: for<'a> Deserialize<'a> + Serialize;
-    type MsgAuthConfig: for<'a> Deserialize<'a> + Serialize;
-    type LargeObjMsgAuthConfig: for<'a> Deserialize<'a> + Serialize;
-    type UnixConfig: Default + for<'a> Deserialize<'a> + Serialize;
-    type UDPConfig: Default + for<'a> Deserialize<'a> + Serialize;
+    type ResolverConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type EpochsConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type SessionAuthConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send;
+    type MsgAuthConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send;
+    type LargeObjMsgAuthConfig: Clone
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type UnixConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type UDPConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize + Send;
     type MsgAuthCreateError: Debug + Display;
     type Msgs: 'static + Send;
     type Recv: 'static + AuthNMsgRecv<Types::MsgPrin, Types::AuthNMsg> + Send;
@@ -158,13 +172,28 @@ where
     Types: HashClientComponentTypes {
     type IDsConfig: Default + for<'a> Deserialize<'a> + Serialize;
     type IDsCreateError: Debug + Display;
-    type ResolverConfig: Default + for<'a> Deserialize<'a> + Serialize;
-    type EpochsConfig: Default + for<'a> Deserialize<'a> + Serialize;
-    type SessionAuthConfig: for<'a> Deserialize<'a> + Serialize;
-    type MsgAuthConfig: for<'a> Deserialize<'a> + Serialize;
-    type LargeObjMsgAuthConfig: for<'a> Deserialize<'a> + Serialize;
-    type UnixConfig: Default + for<'a> Deserialize<'a> + Serialize;
-    type UDPConfig: Default + for<'a> Deserialize<'a> + Serialize;
+    type ResolverConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type EpochsConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type SessionAuthConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send;
+    type MsgAuthConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send;
+    type LargeObjMsgAuthConfig: Clone
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type UnixConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type UDPConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize + Send;
     type MsgAuthCreateError: Debug + Display;
     type Msgs: 'static + Send;
     type Recv: 'static + AuthNMsgRecv<Types::MsgPrin, Types::AuthNMsg> + Send;
@@ -286,70 +315,22 @@ pub struct SimpleHashUnicastClientComponentTypes<
 
 pub struct UnicastClientComponent<ClientTypes, Types>
 where
-    ClientTypes: ClientComponentTypes,
-    Types: UnicastClientComponentTypes<ClientTypes> {
-    config: UnicastLargeObjBusConfig<
-        ClientTypes::HashConfig,
-        Types::SessionAuthConfig,
-        Types::LargeObjMsgAuthConfig,
-        Types::UnixConfig,
-        Types::UDPConfig,
-        XactBatchCodecConfig<
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig
-        >,
-        XactBatchCodecConfig<
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig
-        >,
-        Types::IDsConfig,
-        Types::ResolverConfig,
-        Types::EpochsConfig,
-        Types::MsgAuthConfig
-    >,
+    ClientTypes: 'static + ClientComponentTypes,
+    Types: 'static + UnicastClientComponentTypes<ClientTypes> {
+    starter: UnicastLargeObjBusStarter<Types::BusTypes, Types::Ctx>,
     session_param: Types::SessionParam,
     session_config: Types::SessionConfig,
-    ctx: Types::Ctx
+    notify: Notify
 }
 
 pub struct HashUnicastClientComponent<ClientTypes, Types>
 where
-    ClientTypes: HashClientComponentTypes,
-    Types: HashUnicastClientComponentTypes<ClientTypes> {
-    config: UnicastLargeObjBusConfig<
-        ClientTypes::HashConfig,
-        Types::SessionAuthConfig,
-        Types::LargeObjMsgAuthConfig,
-        Types::UnixConfig,
-        Types::UDPConfig,
-        XactBatchCodecConfig<
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig
-        >,
-        XactBatchCodecConfig<
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig
-        >,
-        Types::IDsConfig,
-        Types::ResolverConfig,
-        Types::EpochsConfig,
-        Types::MsgAuthConfig
-    >,
+    ClientTypes: 'static + HashClientComponentTypes,
+    Types: 'static + HashUnicastClientComponentTypes<ClientTypes> {
+    starter: UnicastLargeObjBusStarter<Types::BusTypes, Types::Ctx>,
     session_param: Types::SessionParam,
     session_config: Types::SessionConfig,
-    ctx: Types::Ctx
+    notify: Notify
 }
 
 pub struct UnicastClientComponentCleanup<ClientTypes, Types>
@@ -371,6 +352,12 @@ where
 pub struct UnicastClientParam<Ctx, Param> {
     session_param: Param,
     ctx: Ctx
+}
+
+#[derive(Debug)]
+pub enum UnicastClientComponentCreateError<Session> {
+    Session { err: Session },
+    IO { err: Error }
 }
 
 #[derive(Debug)]
@@ -451,12 +438,13 @@ where
     BusTypes::SessionPrin: for<'a> Deserialize<'a> + Serialize,
     BusTypes::IDsConfig: for<'a> Deserialize<'a> + Serialize,
     BusTypes::ResolverConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::EpochsConfig: for<'a> Deserialize<'a> + Serialize,
+    BusTypes::EpochsConfig: Clone + for<'a> Deserialize<'a> + Serialize,
     BusTypes::SessionAuthConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::MsgAuthConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::LargeObjMsgAuthConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::UnixConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::UDPConfig: for<'a> Deserialize<'a> + Serialize,
+    BusTypes::MsgAuthConfig: Clone + for<'a> Deserialize<'a> + Serialize,
+    BusTypes::LargeObjMsgAuthConfig:
+        Clone + for<'a> Deserialize<'a> + Serialize,
+    BusTypes::UnixConfig: Clone + for<'a> Deserialize<'a> + Serialize,
+    BusTypes::UDPConfig: Clone + for<'a> Deserialize<'a> + Serialize,
     BusTypes::Msgs: 'static,
     BusTypes::Recv: 'static,
     Session: UnicastClientSession<BusTypes::Recv, BusTypes::Msgs>,
@@ -559,10 +547,11 @@ where
     BusTypes::SessionPrin: for<'a> Deserialize<'a> + Serialize,
     BusTypes::IDsConfig: for<'a> Deserialize<'a> + Serialize,
     BusTypes::ResolverConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::EpochsConfig: for<'a> Deserialize<'a> + Serialize,
+    BusTypes::EpochsConfig: Clone + for<'a> Deserialize<'a> + Serialize,
     BusTypes::SessionAuthConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::MsgAuthConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::LargeObjMsgAuthConfig: for<'a> Deserialize<'a> + Serialize,
+    BusTypes::MsgAuthConfig: Clone + for<'a> Deserialize<'a> + Serialize,
+    BusTypes::LargeObjMsgAuthConfig:
+        Clone + for<'a> Deserialize<'a> + Serialize,
     BusTypes::UnixConfig: for<'a> Deserialize<'a> + Serialize,
     BusTypes::UDPConfig: for<'a> Deserialize<'a> + Serialize,
     BusTypes::Msgs: 'static,
@@ -606,127 +595,46 @@ impl<Ctx, Param> UnicastClientParam<Ctx, Param> {
     }
 }
 
-impl<ClientTypes, Types>
-    CreateWithParam<UnicastClientParam<Types::Ctx, Types::SessionParam>>
-    for UnicastClientComponent<ClientTypes, Types>
-where
-    ClientTypes: ClientComponentTypes,
-    Types: UnicastClientComponentTypes<ClientTypes>
-{
-    type Config = UnicastClientConfig<
-        Types::SessionConfig,
-        ClientTypes::SealCodecConfig,
-        ClientTypes::PayloadCodecConfig,
-        ClientTypes::EffectCodecConfig,
-        ClientTypes::ResultCodecConfig,
-        ClientTypes::ErrorCodecConfig,
-        ClientTypes::HashConfig,
-        Types::SessionAuthConfig,
-        Types::LargeObjMsgAuthConfig,
-        Types::UnixConfig,
-        Types::UDPConfig,
-        Types::IDsConfig,
-        Types::ResolverConfig,
-        Types::EpochsConfig,
-        Types::MsgAuthConfig
-    >;
-    type CreateError = Infallible;
-
-    fn create(
-        config: UnicastClientConfig<
-            Types::SessionConfig,
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig,
-            ClientTypes::HashConfig,
-            Types::SessionAuthConfig,
-            Types::LargeObjMsgAuthConfig,
-            Types::UnixConfig,
-            Types::UDPConfig,
-            Types::IDsConfig,
-            Types::ResolverConfig,
-            Types::EpochsConfig,
-            Types::MsgAuthConfig
-        >,
-        param: UnicastClientParam<Types::Ctx, Types::SessionParam>
-    ) -> Result<Self, Self::CreateError> {
-        let (config, session_config) = config.take();
-        let UnicastClientParam { ctx, session_param } = param;
-
-        Ok(UnicastClientComponent {
-            config: config,
-            session_param: session_param,
-            session_config: session_config,
-            ctx: ctx
-        })
-    }
-}
-
-impl<ClientTypes, Types>
-    CreateWithParam<UnicastClientParam<Types::Ctx, Types::SessionParam>>
-    for HashUnicastClientComponent<ClientTypes, Types>
-where
-    ClientTypes: HashClientComponentTypes,
-    Types: HashUnicastClientComponentTypes<ClientTypes>
-{
-    type Config = UnicastClientConfig<
-        Types::SessionConfig,
-        ClientTypes::SealCodecConfig,
-        ClientTypes::PayloadCodecConfig,
-        ClientTypes::EffectCodecConfig,
-        ClientTypes::ResultCodecConfig,
-        ClientTypes::ErrorCodecConfig,
-        ClientTypes::HashConfig,
-        Types::SessionAuthConfig,
-        Types::LargeObjMsgAuthConfig,
-        Types::UnixConfig,
-        Types::UDPConfig,
-        Types::IDsConfig,
-        Types::ResolverConfig,
-        Types::EpochsConfig,
-        Types::MsgAuthConfig
-    >;
-    type CreateError = Infallible;
-
-    fn create(
-        config: UnicastClientConfig<
-            Types::SessionConfig,
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig,
-            ClientTypes::HashConfig,
-            Types::SessionAuthConfig,
-            Types::LargeObjMsgAuthConfig,
-            Types::UnixConfig,
-            Types::UDPConfig,
-            Types::IDsConfig,
-            Types::ResolverConfig,
-            Types::EpochsConfig,
-            Types::MsgAuthConfig
-        >,
-        param: UnicastClientParam<Types::Ctx, Types::SessionParam>
-    ) -> Result<Self, Self::CreateError> {
-        let (config, session_config) = config.take();
-        let UnicastClientParam { ctx, session_param } = param;
-
-        Ok(HashUnicastClientComponent {
-            config: config,
-            session_param: session_param,
-            session_config: session_config,
-            ctx: ctx
-        })
-    }
-}
-
 impl<ClientTypes, Types> UnicastClientComponent<ClientTypes, Types>
 where
     ClientTypes: 'static + ClientComponentTypes,
     Types: 'static + UnicastClientComponentTypes<ClientTypes>
 {
+    pub fn create(
+        config: UnicastClientConfig<
+            Types::SessionConfig,
+            ClientTypes::SealCodecConfig,
+            ClientTypes::PayloadCodecConfig,
+            ClientTypes::EffectCodecConfig,
+            ClientTypes::ResultCodecConfig,
+            ClientTypes::ErrorCodecConfig,
+            ClientTypes::HashConfig,
+            Types::SessionAuthConfig,
+            Types::LargeObjMsgAuthConfig,
+            Types::UnixConfig,
+            Types::UDPConfig,
+            Types::IDsConfig,
+            Types::ResolverConfig,
+            Types::EpochsConfig,
+            Types::MsgAuthConfig
+        >,
+        param: UnicastClientParam<Types::Ctx, Types::SessionParam>
+    ) -> Result<(Self, Notify), Error> {
+        let (config, session_config) = config.take();
+        let UnicastClientParam { ctx, session_param } = param;
+        let (starter, notify) = UnicastLargeObjBusStarter::create(config, ctx)?;
+
+        Ok((
+            UnicastClientComponent {
+                starter: starter,
+                session_param: session_param,
+                session_config: session_config,
+                notify: notify.clone()
+            },
+            notify
+        ))
+    }
+
     pub fn start(
         self,
         shutdown: ShutdownFlag
@@ -785,29 +693,23 @@ where
         >
     > {
         let UnicastClientComponent {
-            config,
+            starter,
             session_param,
             session_config,
-            ctx
+            notify
         } = self;
 
         info!(target: "unicast-client-component",
               "starting unicast client component");
 
         let (session, recv, msgs) =
-            Types::Session::create(session_config, session_param).map_err(
-                |err| UnicastClientComponentRunError::Session { err: err }
-            )?;
-        let unicast = UnicastLargeObjBus::start(
-            config,
-            ctx,
-            recv,
-            msgs,
-            shutdown
-        )
-            .map_err(|err| UnicastClientComponentRunError::Unicast {
-                err: err
-            })?;
+            Types::Session::create(session_config, notify, session_param)
+                .map_err(|err| UnicastClientComponentRunError::Session {
+                    err: err
+                })?;
+        let unicast = starter.start(recv, msgs, shutdown).map_err(|err| {
+            UnicastClientComponentRunError::Unicast { err: err }
+        })?;
         let session_cleanup = session.start().map_err(|err| {
             UnicastClientComponentRunError::Start { err: err }
         })?;
@@ -824,6 +726,41 @@ where
     ClientTypes: 'static + HashClientComponentTypes,
     Types: 'static + HashUnicastClientComponentTypes<ClientTypes>
 {
+    pub fn create(
+        config: UnicastClientConfig<
+            Types::SessionConfig,
+            ClientTypes::SealCodecConfig,
+            ClientTypes::PayloadCodecConfig,
+            ClientTypes::EffectCodecConfig,
+            ClientTypes::ResultCodecConfig,
+            ClientTypes::ErrorCodecConfig,
+            ClientTypes::HashConfig,
+            Types::SessionAuthConfig,
+            Types::LargeObjMsgAuthConfig,
+            Types::UnixConfig,
+            Types::UDPConfig,
+            Types::IDsConfig,
+            Types::ResolverConfig,
+            Types::EpochsConfig,
+            Types::MsgAuthConfig
+        >,
+        param: UnicastClientParam<Types::Ctx, Types::SessionParam>
+    ) -> Result<(Self, Notify), Error> {
+        let (config, session_config) = config.take();
+        let UnicastClientParam { ctx, session_param } = param;
+        let (starter, notify) = UnicastLargeObjBusStarter::create(config, ctx)?;
+
+        Ok((
+            HashUnicastClientComponent {
+                starter: starter,
+                session_param: session_param,
+                session_config: session_config,
+                notify: notify.clone()
+            },
+            notify
+        ))
+    }
+
     pub fn start(
         self,
         shutdown: ShutdownFlag
@@ -882,29 +819,23 @@ where
         >
     > {
         let HashUnicastClientComponent {
-            config,
+            starter,
             session_param,
             session_config,
-            ctx
+            notify
         } = self;
 
         info!(target: "unicast-client-component",
               "starting unicast client component");
 
         let (session, recv, msgs) =
-            Types::Session::create(session_config, session_param).map_err(
-                |err| UnicastClientComponentRunError::Session { err: err }
-            )?;
-        let unicast = UnicastLargeObjBus::start(
-            config,
-            ctx,
-            recv,
-            msgs,
-            shutdown
-        )
-            .map_err(|err| UnicastClientComponentRunError::Unicast {
-                err: err
-            })?;
+            Types::Session::create(session_config, notify, session_param)
+                .map_err(|err| UnicastClientComponentRunError::Session {
+                    err: err
+                })?;
+        let unicast = starter.start(recv, msgs, shutdown).map_err(|err| {
+            UnicastClientComponentRunError::Unicast { err: err }
+        })?;
         let session_cleanup = session.start().map_err(|err| {
             UnicastClientComponentRunError::Start { err: err }
         })?;
@@ -939,6 +870,23 @@ where
 
         unicast.cleanup();
         session.cleanup();
+    }
+}
+
+impl<Session> Display for UnicastClientComponentCreateError<Session>
+where
+    Session: Display
+{
+    fn fmt(
+        &self,
+        f: &mut Formatter<'_>
+    ) -> Result<(), std::fmt::Error> {
+        match self {
+            UnicastClientComponentCreateError::Session { err } => err.fmt(f),
+            UnicastClientComponentCreateError::IO { err } => {
+                write!(f, "{}", err)
+            }
+        }
     }
 }
 

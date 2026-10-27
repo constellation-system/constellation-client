@@ -61,7 +61,6 @@ use constellation_component_common::xact::test::TestSealCodec;
 use constellation_streams::large_obj::LargeObjID;
 use constellation_streams::large_obj::LargeObjMsg;
 use constellation_streams::large_obj::LargeObjMsgs;
-use constellation_streams::threads::poll::MsgsSetNotify;
 
 use crate::component::ClientComponentTypes;
 use crate::component::HashClientComponentTypes;
@@ -73,7 +72,7 @@ pub struct TestHashClientComponentTypes;
 
 pub struct TestBusTypes<Msgs, Recv, Ctx>
 where
-    Msgs: LargeObjMsgs<SHA3Algo, TestBatch> + MsgsSetNotify + Send,
+    Msgs: LargeObjMsgs<SHA3Algo, TestBatch> + Send,
     Recv: Clone + AuthNMsgRecv<String, BasicAuthNed<String, TestBatch>> + Send,
     Ctx: NSNameCachesCtx + Send {
     msgs: PhantomData<Msgs>,
@@ -83,7 +82,7 @@ where
 
 pub struct TestHashBusTypes<Msgs, Recv, Ctx>
 where
-    Msgs: LargeObjMsgs<SHA3Algo, TestHashBatch> + MsgsSetNotify + Send,
+    Msgs: LargeObjMsgs<SHA3Algo, TestHashBatch> + Send,
     Recv: Clone
         + AuthNMsgRecv<String, BasicAuthNed<String, TestHashBatch>>
         + Send,
@@ -167,7 +166,7 @@ impl HashClientComponentTypes for TestHashClientComponentTypes {
 impl<Msgs, Recv, Ctx> UnicastLargeObjBusTypes<Ctx>
     for TestBusTypes<Msgs, Recv, Ctx>
 where
-    Msgs: LargeObjMsgs<SHA3Algo, TestBatch> + MsgsSetNotify + Send,
+    Msgs: LargeObjMsgs<SHA3Algo, TestBatch> + Send,
     Recv: Clone + AuthNMsgRecv<String, BasicAuthNed<String, TestBatch>> + Send,
     Ctx: 'static + NSNameCachesCtx + Send
 {
@@ -235,7 +234,7 @@ where
 impl<Msgs, Recv, Ctx> UnicastLargeObjBusTypes<Ctx>
     for TestHashBusTypes<Msgs, Recv, Ctx>
 where
-    Msgs: LargeObjMsgs<SHA3Algo, TestHashBatch> + MsgsSetNotify + Send,
+    Msgs: LargeObjMsgs<SHA3Algo, TestHashBatch> + Send,
     Recv: Clone
         + AuthNMsgRecv<String, BasicAuthNed<String, TestHashBatch>>
         + Send,
@@ -305,7 +304,7 @@ where
 impl<Msgs, Recv, Ctx> MulticastLargeObjBusTypes<Ctx>
     for TestBusTypes<Msgs, Recv, Ctx>
 where
-    Msgs: LargeObjMsgs<SHA3Algo, TestBatch> + MsgsSetNotify + Send,
+    Msgs: LargeObjMsgs<SHA3Algo, TestBatch> + Send,
     Recv: Clone + AuthNMsgRecv<String, BasicAuthNed<String, TestBatch>> + Send,
     Ctx: 'static + NSNameCachesCtx + Send
 {
@@ -373,7 +372,7 @@ where
 impl<Msgs, Recv, Ctx> MulticastLargeObjBusTypes<Ctx>
     for TestHashBusTypes<Msgs, Recv, Ctx>
 where
-    Msgs: LargeObjMsgs<SHA3Algo, TestHashBatch> + MsgsSetNotify + Send,
+    Msgs: LargeObjMsgs<SHA3Algo, TestHashBatch> + Send,
     Recv: Clone
         + AuthNMsgRecv<String, BasicAuthNed<String, TestHashBatch>>
         + Send,

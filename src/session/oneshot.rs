@@ -38,7 +38,6 @@ use constellation_channels::resolve::cache::ThreadedNSNameCaches;
 use constellation_common::codec::Encoder;
 use constellation_common::config::Create;
 #[cfg(feature = "standalone")]
-use constellation_common::config::CreateWithParam;
 use constellation_common::error::MutexPoison;
 use constellation_common::error::ScopedError;
 use constellation_common::error::WithMutexPoison;
@@ -65,7 +64,6 @@ use constellation_streams::large_obj::LargeObjMsgs;
 use constellation_streams::large_obj::LargeObjProtoAddOutboundError;
 use constellation_streams::large_obj::LargeObjSender;
 use constellation_streams::multicast::MulticastStreamIdx;
-use constellation_streams::threads::poll::MsgsSetNotify;
 use log::debug;
 #[cfg(feature = "standalone")]
 use log::error;
@@ -150,7 +148,7 @@ where
             >
         >
     >,
-    notify: Mutex<Option<Notify>>,
+    notify: Notify,
     resubmit: Retry
 }
 
@@ -240,23 +238,6 @@ where
     #[inline]
     fn complete(&self) -> Result<(), MutexPoison> {
         *self.msg.lock().map_err(|_| MutexPoison)? = None;
-
-        Ok(())
-    }
-}
-
-impl<Types> MsgsSetNotify for OneShotSessionMsgs<Types>
-where
-    Types: ClientComponentTypes
-{
-    type Error = MutexPoison;
-
-    #[inline]
-    fn set_notify(
-        &mut self,
-        notify: Notify
-    ) -> Result<(), Self::Error> {
-        *self.state.notify.lock().map_err(|_| MutexPoison)? = Some(notify);
 
         Ok(())
     }
@@ -396,6 +377,7 @@ where
 
     fn create(
         config: Self::Config,
+        notify: Notify,
         param: App::Param
     ) -> Result<
         (Self, OneShotSessionRecv<Types>, OneShotSessionMsgs<Types>),
@@ -417,7 +399,7 @@ where
         };
         let state = OneShotState {
             resubmit: resubmit,
-            notify: Mutex::new(None),
+            notify: notify,
             msg: Mutex::new(Some(msg))
         };
         let state = Arc::new(state);
@@ -473,8 +455,8 @@ pub struct StandaloneOneShotRunCleanup {
 #[cfg(feature = "standalone")]
 pub struct StandaloneOneShot<ClientTypes, Types, App>
 where
-    ClientTypes: ClientComponentTypes,
-    Types: MulticastClientComponentTypes<ClientTypes>,
+    ClientTypes: 'static + ClientComponentTypes,
+    Types: 'static + MulticastClientComponentTypes<ClientTypes>,
     App: OneShot<
             ClientTypes::RoundID,
             ClientTypes::Payload,
@@ -566,16 +548,15 @@ where
         shutdown: &ShutdownFlag
     ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
         let (name_caches_config, client_config) = config.take();
-        let (caches, caches_join) = ThreadedNSNameCaches::create(
-            name_caches_config, shutdown.clone()
-        )
-        .map_err(|err| {
-            error!(target: "one-shot-standalone",
+        let (caches, caches_join) =
+            ThreadedNSNameCaches::create(name_caches_config, shutdown.clone())
+                .map_err(|err| {
+                    error!(target: "one-shot-standalone",
                        "error creating name caches: {}",
                        err);
 
-            StandaloneOneShotCreateCleanup { caches: None }
-        })?;
+                    StandaloneOneShotCreateCleanup { caches: None }
+                })?;
         let ctx = StandaloneCtx::new(caches);
         let cleanup = StandaloneOneShotCreateCleanup {
             caches: Some((shutdown.clone(), caches_join))
@@ -586,7 +567,7 @@ where
                 let param = MulticastClientParam::new(arg, ctx);
 
                 match MulticastClientComponent::create(client_config, param) {
-                    Ok(component) => {
+                    Ok((component, _)) => {
                         let out = StandaloneOneShot {
                             app: PhantomData,
                             component: component

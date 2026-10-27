@@ -16,7 +16,6 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
-use std::convert::Infallible;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -26,13 +25,13 @@ use std::marker::PhantomData;
 
 use constellation_auth::authn::AuthNMsgRecv;
 use constellation_channels::resolve::cache::NSNameCachesCtx;
-use constellation_common::config::CreateWithParam;
 use constellation_common::error::MutexPoison;
 use constellation_common::shutdown::ShutdownFlag;
+use constellation_common::sync::Notify;
 use constellation_component_common::bus::multicast::MulticastLargeObjBus;
 use constellation_component_common::bus::multicast::MulticastLargeObjBusCreateError;
+use constellation_component_common::bus::multicast::MulticastLargeObjBusStarter;
 use constellation_component_common::bus::types::MulticastLargeObjBusTypes;
-use constellation_component_common::config::MulticastLargeObjBusConfig;
 use constellation_component_common::config::XactBatchCodecConfig;
 use constellation_component_common::xact::XactBatchCodecCreateError;
 use constellation_component_common::xact::XactCommittedRoundCodecCreateError;
@@ -64,13 +63,28 @@ where
         + Serialize;
     type IDsConfig: Default + for<'a> Deserialize<'a> + Serialize;
     type IDsCreateError: Debug + Display;
-    type ResolverConfig: Default + for<'a> Deserialize<'a> + Serialize;
-    type EpochsConfig: Default + for<'a> Deserialize<'a> + Serialize;
-    type SessionAuthConfig: for<'a> Deserialize<'a> + Serialize;
-    type MsgAuthConfig: for<'a> Deserialize<'a> + Serialize;
-    type LargeObjMsgAuthConfig: for<'a> Deserialize<'a> + Serialize;
-    type UnixConfig: Default + for<'a> Deserialize<'a> + Serialize;
-    type UDPConfig: Default + for<'a> Deserialize<'a> + Serialize;
+    type ResolverConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type EpochsConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type SessionAuthConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send;
+    type MsgAuthConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send;
+    type LargeObjMsgAuthConfig: Clone
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type UnixConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type UDPConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize + Send;
     type MsgAuthCreateError: Debug + Display;
     type Msgs: 'static + Send;
     type Recv: 'static + AuthNMsgRecv<Types::MsgPrin, Types::AuthNMsg> + Send;
@@ -178,13 +192,28 @@ where
         + Serialize;
     type IDsConfig: Default + for<'a> Deserialize<'a> + Serialize;
     type IDsCreateError: Debug + Display;
-    type ResolverConfig: Default + for<'a> Deserialize<'a> + Serialize;
-    type EpochsConfig: Default + for<'a> Deserialize<'a> + Serialize;
-    type SessionAuthConfig: for<'a> Deserialize<'a> + Serialize;
-    type MsgAuthConfig: for<'a> Deserialize<'a> + Serialize;
-    type LargeObjMsgAuthConfig: for<'a> Deserialize<'a> + Serialize;
-    type UnixConfig: Default + for<'a> Deserialize<'a> + Serialize;
-    type UDPConfig: Default + for<'a> Deserialize<'a> + Serialize;
+    type ResolverConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type EpochsConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type SessionAuthConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send;
+    type MsgAuthConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send;
+    type LargeObjMsgAuthConfig: Clone
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type UnixConfig: Clone
+        + Default
+        + for<'a> Deserialize<'a>
+        + Serialize
+        + Send;
+    type UDPConfig: Clone + Default + for<'a> Deserialize<'a> + Serialize + Send;
     type MsgAuthCreateError: Debug + Display;
     type Msgs: 'static + Send;
     type Recv: 'static + AuthNMsgRecv<Types::MsgPrin, Types::AuthNMsg> + Send;
@@ -306,72 +335,22 @@ pub struct SimpleHashMulticastClientComponentTypes<
 
 pub struct MulticastClientComponent<ClientTypes, Types>
 where
-    ClientTypes: ClientComponentTypes,
-    Types: MulticastClientComponentTypes<ClientTypes> {
-    config: MulticastLargeObjBusConfig<
-        Types::SessionPrin,
-        ClientTypes::HashConfig,
-        Types::SessionAuthConfig,
-        Types::LargeObjMsgAuthConfig,
-        Types::UnixConfig,
-        Types::UDPConfig,
-        XactBatchCodecConfig<
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig
-        >,
-        XactBatchCodecConfig<
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig
-        >,
-        Types::IDsConfig,
-        Types::ResolverConfig,
-        Types::EpochsConfig,
-        Types::MsgAuthConfig
-    >,
+    ClientTypes: 'static + ClientComponentTypes,
+    Types: 'static + MulticastClientComponentTypes<ClientTypes> {
+    starter: MulticastLargeObjBusStarter<Types::BusTypes, Types::Ctx>,
     session_param: Types::SessionParam,
     session_config: Types::SessionConfig,
-    ctx: Types::Ctx
+    notify: Notify
 }
 
 pub struct HashMulticastClientComponent<ClientTypes, Types>
 where
-    ClientTypes: HashClientComponentTypes,
-    Types: HashMulticastClientComponentTypes<ClientTypes> {
-    config: MulticastLargeObjBusConfig<
-        Types::SessionPrin,
-        ClientTypes::HashConfig,
-        Types::SessionAuthConfig,
-        Types::LargeObjMsgAuthConfig,
-        Types::UnixConfig,
-        Types::UDPConfig,
-        XactBatchCodecConfig<
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig
-        >,
-        XactBatchCodecConfig<
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig
-        >,
-        Types::IDsConfig,
-        Types::ResolverConfig,
-        Types::EpochsConfig,
-        Types::MsgAuthConfig
-    >,
+    ClientTypes: 'static + HashClientComponentTypes,
+    Types: 'static + HashMulticastClientComponentTypes<ClientTypes> {
+    starter: MulticastLargeObjBusStarter<Types::BusTypes, Types::Ctx>,
     session_param: Types::SessionParam,
     session_config: Types::SessionConfig,
-    ctx: Types::Ctx
+    notify: Notify
 }
 
 pub struct MulticastClientComponentCleanup<ClientTypes, Types>
@@ -472,13 +451,16 @@ where
         > + Send,
     BusTypes::SessionPrin: for<'a> Deserialize<'a> + Serialize,
     BusTypes::IDsConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::ResolverConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::EpochsConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::SessionAuthConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::MsgAuthConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::LargeObjMsgAuthConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::UnixConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::UDPConfig: for<'a> Deserialize<'a> + Serialize,
+    BusTypes::ResolverConfig:
+        Clone + for<'a> Deserialize<'a> + Serialize + Send,
+    BusTypes::EpochsConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send,
+    BusTypes::SessionAuthConfig:
+        Clone + for<'a> Deserialize<'a> + Serialize + Send,
+    BusTypes::MsgAuthConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send,
+    BusTypes::LargeObjMsgAuthConfig:
+        Clone + for<'a> Deserialize<'a> + Serialize + Send,
+    BusTypes::UnixConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send,
+    BusTypes::UDPConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send,
     BusTypes::Msgs: 'static,
     BusTypes::Recv: 'static,
     Session: MulticastClientSession<
@@ -598,13 +580,16 @@ where
         > + Send,
     BusTypes::SessionPrin: for<'a> Deserialize<'a> + Serialize,
     BusTypes::IDsConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::ResolverConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::EpochsConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::SessionAuthConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::MsgAuthConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::LargeObjMsgAuthConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::UnixConfig: for<'a> Deserialize<'a> + Serialize,
-    BusTypes::UDPConfig: for<'a> Deserialize<'a> + Serialize,
+    BusTypes::ResolverConfig:
+        Clone + for<'a> Deserialize<'a> + Serialize + Send,
+    BusTypes::EpochsConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send,
+    BusTypes::SessionAuthConfig:
+        Clone + for<'a> Deserialize<'a> + Serialize + Send,
+    BusTypes::MsgAuthConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send,
+    BusTypes::LargeObjMsgAuthConfig:
+        Clone + for<'a> Deserialize<'a> + Serialize + Send,
+    BusTypes::UnixConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send,
+    BusTypes::UDPConfig: Clone + for<'a> Deserialize<'a> + Serialize + Send,
     BusTypes::Msgs: 'static,
     BusTypes::Recv: 'static,
     Session: MulticastClientSession<
@@ -638,132 +623,49 @@ where
     type UnixConfig = BusTypes::UnixConfig;
 }
 
-impl<ClientTypes, Types>
-    CreateWithParam<MulticastClientParam<Types::Ctx, Types::SessionParam>>
-    for MulticastClientComponent<ClientTypes, Types>
-where
-    ClientTypes: ClientComponentTypes,
-    Types: MulticastClientComponentTypes<ClientTypes>
-{
-    type Config = MulticastClientConfig<
-        Types::SessionPrin,
-        Types::SessionConfig,
-        ClientTypes::SealCodecConfig,
-        ClientTypes::PayloadCodecConfig,
-        ClientTypes::EffectCodecConfig,
-        ClientTypes::ResultCodecConfig,
-        ClientTypes::ErrorCodecConfig,
-        ClientTypes::HashConfig,
-        Types::SessionAuthConfig,
-        Types::LargeObjMsgAuthConfig,
-        Types::UnixConfig,
-        Types::UDPConfig,
-        Types::IDsConfig,
-        Types::ResolverConfig,
-        Types::EpochsConfig,
-        Types::MsgAuthConfig
-    >;
-    type CreateError = Infallible;
-
-    fn create(
-        config: MulticastClientConfig<
-            Types::SessionPrin,
-            Types::SessionConfig,
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig,
-            ClientTypes::HashConfig,
-            Types::SessionAuthConfig,
-            Types::LargeObjMsgAuthConfig,
-            Types::UnixConfig,
-            Types::UDPConfig,
-            Types::IDsConfig,
-            Types::ResolverConfig,
-            Types::EpochsConfig,
-            Types::MsgAuthConfig
-        >,
-        param: MulticastClientParam<Types::Ctx, Types::SessionParam>
-    ) -> Result<Self, Self::CreateError> {
-        let (config, session_config) = config.take();
-        let MulticastClientParam { ctx, session_param } = param;
-
-        Ok(MulticastClientComponent {
-            config: config,
-            session_param: session_param,
-            session_config: session_config,
-            ctx: ctx
-        })
-    }
-}
-
-impl<ClientTypes, Types>
-    CreateWithParam<MulticastClientParam<Types::Ctx, Types::SessionParam>>
-    for HashMulticastClientComponent<ClientTypes, Types>
-where
-    ClientTypes: HashClientComponentTypes,
-    Types: HashMulticastClientComponentTypes<ClientTypes>
-{
-    type Config = MulticastClientConfig<
-        Types::SessionPrin,
-        Types::SessionConfig,
-        ClientTypes::SealCodecConfig,
-        ClientTypes::PayloadCodecConfig,
-        ClientTypes::EffectCodecConfig,
-        ClientTypes::ResultCodecConfig,
-        ClientTypes::ErrorCodecConfig,
-        ClientTypes::HashConfig,
-        Types::SessionAuthConfig,
-        Types::LargeObjMsgAuthConfig,
-        Types::UnixConfig,
-        Types::UDPConfig,
-        Types::IDsConfig,
-        Types::ResolverConfig,
-        Types::EpochsConfig,
-        Types::MsgAuthConfig
-    >;
-    type CreateError = Infallible;
-
-    fn create(
-        config: MulticastClientConfig<
-            Types::SessionPrin,
-            Types::SessionConfig,
-            ClientTypes::SealCodecConfig,
-            ClientTypes::PayloadCodecConfig,
-            ClientTypes::EffectCodecConfig,
-            ClientTypes::ResultCodecConfig,
-            ClientTypes::ErrorCodecConfig,
-            ClientTypes::HashConfig,
-            Types::SessionAuthConfig,
-            Types::LargeObjMsgAuthConfig,
-            Types::UnixConfig,
-            Types::UDPConfig,
-            Types::IDsConfig,
-            Types::ResolverConfig,
-            Types::EpochsConfig,
-            Types::MsgAuthConfig
-        >,
-        param: MulticastClientParam<Types::Ctx, Types::SessionParam>
-    ) -> Result<Self, Self::CreateError> {
-        let (config, session_config) = config.take();
-        let MulticastClientParam { ctx, session_param } = param;
-
-        Ok(HashMulticastClientComponent {
-            config: config,
-            session_param: session_param,
-            session_config: session_config,
-            ctx: ctx
-        })
-    }
-}
-
 impl<ClientTypes, Types> MulticastClientComponent<ClientTypes, Types>
 where
     Types: 'static + MulticastClientComponentTypes<ClientTypes>,
     Types::BusTypes: 'static,
     ClientTypes: ClientComponentTypes
 {
+    pub fn create(
+        config: MulticastClientConfig<
+            Types::SessionPrin,
+            Types::SessionConfig,
+            ClientTypes::SealCodecConfig,
+            ClientTypes::PayloadCodecConfig,
+            ClientTypes::EffectCodecConfig,
+            ClientTypes::ResultCodecConfig,
+            ClientTypes::ErrorCodecConfig,
+            ClientTypes::HashConfig,
+            Types::SessionAuthConfig,
+            Types::LargeObjMsgAuthConfig,
+            Types::UnixConfig,
+            Types::UDPConfig,
+            Types::IDsConfig,
+            Types::ResolverConfig,
+            Types::EpochsConfig,
+            Types::MsgAuthConfig
+        >,
+        param: MulticastClientParam<Types::Ctx, Types::SessionParam>
+    ) -> Result<(Self, Notify), Error> {
+        let (config, session_config) = config.take();
+        let MulticastClientParam { ctx, session_param } = param;
+        let (starter, notify) =
+            MulticastLargeObjBusStarter::create(config, ctx)?;
+
+        Ok((
+            MulticastClientComponent {
+                starter: starter,
+                session_param: session_param,
+                session_config: session_config,
+                notify: notify.clone()
+            },
+            notify
+        ))
+    }
+
     pub fn start(
         self,
         shutdown: ShutdownFlag
@@ -823,24 +725,24 @@ where
         >
     > {
         let MulticastClientComponent {
+            starter,
             session_param,
             session_config,
-            config,
-            ctx,
-            ..
+            notify
         } = self;
 
         info!(target: "multicast-client-component",
               "starting multicast client component");
 
         let (session, recv, msgs) =
-            Types::Session::create(session_config, session_param).map_err(
-                |err| MulticastClientComponentRunError::Session { err: err }
-            )?;
+            Types::Session::create(session_config, notify, session_param)
+                .map_err(|err| MulticastClientComponentRunError::Session {
+                    err: err
+                })?;
         let (multicast, parties) =
-            MulticastLargeObjBus::start(config, ctx, recv, msgs, shutdown).map_err(
-                |err| MulticastClientComponentRunError::Multicast { err: err }
-            )?;
+            starter.start(recv, msgs, shutdown).map_err(|err| {
+                MulticastClientComponentRunError::Multicast { err: err }
+            })?;
         let session_cleanup =
             session.start(parties.into_iter()).map_err(|err| {
                 MulticastClientComponentRunError::Start { err: err }
@@ -859,6 +761,43 @@ where
     Types::BusTypes: 'static,
     ClientTypes: HashClientComponentTypes
 {
+    pub fn create(
+        config: MulticastClientConfig<
+            Types::SessionPrin,
+            Types::SessionConfig,
+            ClientTypes::SealCodecConfig,
+            ClientTypes::PayloadCodecConfig,
+            ClientTypes::EffectCodecConfig,
+            ClientTypes::ResultCodecConfig,
+            ClientTypes::ErrorCodecConfig,
+            ClientTypes::HashConfig,
+            Types::SessionAuthConfig,
+            Types::LargeObjMsgAuthConfig,
+            Types::UnixConfig,
+            Types::UDPConfig,
+            Types::IDsConfig,
+            Types::ResolverConfig,
+            Types::EpochsConfig,
+            Types::MsgAuthConfig
+        >,
+        param: MulticastClientParam<Types::Ctx, Types::SessionParam>
+    ) -> Result<(Self, Notify), Error> {
+        let (config, session_config) = config.take();
+        let MulticastClientParam { ctx, session_param } = param;
+        let (starter, notify) =
+            MulticastLargeObjBusStarter::create(config, ctx)?;
+
+        Ok((
+            HashMulticastClientComponent {
+                starter: starter,
+                session_param: session_param,
+                session_config: session_config,
+                notify: notify.clone()
+            },
+            notify
+        ))
+    }
+
     pub fn start(
         self,
         shutdown: ShutdownFlag
@@ -918,24 +857,24 @@ where
         >
     > {
         let HashMulticastClientComponent {
+            starter,
             session_param,
             session_config,
-            config,
-            ctx,
-            ..
+            notify
         } = self;
 
         info!(target: "multicast-client-component",
               "starting multicast client component");
 
         let (session, recv, msgs) =
-            Types::Session::create(session_config, session_param).map_err(
-                |err| MulticastClientComponentRunError::Session { err: err }
-            )?;
+            Types::Session::create(session_config, notify, session_param)
+                .map_err(|err| MulticastClientComponentRunError::Session {
+                    err: err
+                })?;
         let (multicast, parties) =
-            MulticastLargeObjBus::start(config, ctx, recv, msgs, shutdown).map_err(
-                |err| MulticastClientComponentRunError::Multicast { err: err }
-            )?;
+            starter.start(recv, msgs, shutdown).map_err(|err| {
+                MulticastClientComponentRunError::Multicast { err: err }
+            })?;
         let session_cleanup =
             session.start(parties.into_iter()).map_err(|err| {
                 MulticastClientComponentRunError::Start { err: err }

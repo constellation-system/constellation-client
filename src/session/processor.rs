@@ -38,7 +38,6 @@ use constellation_auth::authn::AuthNedDestruct;
 use constellation_channels::resolve::cache::ThreadedNSNameCaches;
 use constellation_common::codec::Encoder;
 use constellation_common::config::Create;
-use constellation_common::config::CreateWithParam;
 use constellation_common::error::MutexPoison;
 use constellation_common::error::ScopedError;
 use constellation_common::error::WithMutexPoison;
@@ -78,7 +77,6 @@ use constellation_streams::frags::Frags;
 use constellation_streams::large_obj::LargeObjMsgs;
 use constellation_streams::large_obj::LargeObjProtoAddOutboundError;
 use constellation_streams::large_obj::LargeObjSender;
-use constellation_streams::threads::poll::MsgsSetNotify;
 use log::debug;
 use log::error;
 use log::info;
@@ -173,7 +171,7 @@ where
         >
     >,
     proc: Mutex<Proc>,
-    notify: Mutex<Option<Notify>>,
+    notify: Notify,
     resubmit: Retry
 }
 
@@ -338,29 +336,6 @@ where
         hash: &Types::HashID
     ) -> Result<(), MutexPoison> {
         self.pending.lock().map_err(|_| MutexPoison)?.remove(hash);
-
-        Ok(())
-    }
-}
-
-impl<Types, Proc> MsgsSetNotify for ProcessorSessionMsgs<Types, Proc>
-where
-    Proc: Processor<
-            Types::RoundID,
-            Types::Payload,
-            Types::Effect,
-            Types::Result,
-            Types::Error
-        >,
-    Types: HashClientComponentTypes
-{
-    type Error = MutexPoison;
-
-    fn set_notify(
-        &mut self,
-        notify: Notify
-    ) -> Result<(), Self::Error> {
-        *self.state.notify.lock().map_err(|_| MutexPoison)? = Some(notify);
 
         Ok(())
     }
@@ -829,22 +804,10 @@ where
         }
 
         if notify {
-            if let Some(notify) = &mut *self
-                .state
+            self.state
                 .notify
-                .lock()
-                .map_err(|_| WithMutexPoison::MutexPoison)?
-            {
-                trace!(target: "processor-recv",
-                       "notifying message thread");
-
-                notify
-                    .notify()
-                    .map_err(|err| WithMutexPoison::Inner { err: err })?;
-            } else {
-                error!(target: "processor-recv",
-                       "notify is not set");
-            }
+                .notify()
+                .map_err(|err| WithMutexPoison::Inner { err: err })?;
         }
 
         Ok(())
@@ -878,6 +841,7 @@ where
 
     fn create(
         config: Self::Config,
+        notify: Notify,
         _param: ()
     ) -> Result<
         (
@@ -896,7 +860,7 @@ where
             pending: Mutex::new(HashMap::new()),
             resubmit: resubmit,
             proc: Mutex::new(proc),
-            notify: Mutex::new(None)
+            notify: notify
         };
         let state = Arc::new(state);
         let msgs = ProcessorSessionMsgs {
@@ -938,8 +902,9 @@ where
 #[cfg(feature = "standalone")]
 pub struct StandaloneProcessor<ClientTypes, Types, Proc>
 where
-    ClientTypes: HashClientComponentTypes,
-    Types: HashUnicastClientComponentTypes<
+    ClientTypes: 'static + HashClientComponentTypes,
+    Types: 'static
+        + HashUnicastClientComponentTypes<
             ClientTypes,
             Session = ProcessorSession<ClientTypes, Proc>,
             SessionParam = (),
@@ -1035,16 +1000,15 @@ where
         shutdown: &ShutdownFlag
     ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
         let (name_caches_config, client_config) = config.take();
-        let (caches, caches_join) = ThreadedNSNameCaches::create(
-            name_caches_config, shutdown.clone()
-        )
-        .map_err(|err| {
-            error!(target: "processor-standalone",
+        let (caches, caches_join) =
+            ThreadedNSNameCaches::create(name_caches_config, shutdown.clone())
+                .map_err(|err| {
+                    error!(target: "processor-standalone",
                        "error creating name caches: {}",
                        err);
 
-            StandaloneProcessorCreateCleanup { caches: None }
-        })?;
+                    StandaloneProcessorCreateCleanup { caches: None }
+                })?;
         let ctx = StandaloneCtx::new(caches);
         let cleanup = StandaloneProcessorCreateCleanup {
             caches: Some((shutdown.clone(), caches_join))
@@ -1052,7 +1016,7 @@ where
         let param = UnicastClientParam::new((), ctx);
 
         match HashUnicastClientComponent::create(client_config, param) {
-            Ok(component) => {
+            Ok((component, _)) => {
                 let out = StandaloneProcessor {
                     proc: PhantomData,
                     component: component

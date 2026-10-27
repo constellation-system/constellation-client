@@ -19,6 +19,7 @@
 use std::fmt::Debug;
 use std::fmt::Display;
 
+use constellation_common::sync::Notify;
 use constellation_streams::multicast::MulticastStreamIdx;
 
 pub mod oneshot;
@@ -34,6 +35,7 @@ pub trait MulticastClientSession<Prin, Recv, Msgs>: Sized {
 
     fn create(
         config: Self::Config,
+        notify: Notify,
         param: Self::Param
     ) -> Result<(Self, Recv, Msgs), Self::CreateError>;
 
@@ -54,6 +56,7 @@ pub trait UnicastClientSession<Recv, Msgs>: Sized {
 
     fn create(
         config: Self::Config,
+        notify: Notify,
         param: Self::Param
     ) -> Result<(Self, Recv, Msgs), Self::CreateError>;
 
