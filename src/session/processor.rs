@@ -888,7 +888,13 @@ where
 
 #[cfg(feature = "standalone")]
 pub struct StandaloneProcessorCreateCleanup {
-    caches: Option<(ShutdownFlag, JoinHandle<()>)>
+    shutdown: ShutdownFlag,
+    caches_join: JoinHandle<()>
+}
+
+#[cfg(feature = "standalone")]
+pub struct StandaloneProcessorCreateErrorCleanup {
+    caches: Option<StandaloneProcessorCreateCleanup>
 }
 
 #[cfg(feature = "standalone")]
@@ -985,6 +991,7 @@ where
         Types::MsgAuthConfig
     >;
     type CreateCleanup = StandaloneProcessorCreateCleanup;
+    type CreateErrorCleanup = StandaloneProcessorCreateErrorCleanup;
 
     const CONFIG_FILES: &[&str] = Proc::CONFIG_FILES;
     const NAME: &str = Proc::SERVICE_NAME;
@@ -994,11 +1001,32 @@ where
         Some(VersionSuffix::Development)
     );
 
+    fn cleanup_create_err(create: Self::CreateErrorCleanup) {
+        if let Some(cleanup) = create.caches {
+            let StandaloneProcessorCreateCleanup {
+                caches_join,
+                mut shutdown
+            } = cleanup;
+
+            debug!(target: "processor",
+                   "cleaning up caches");
+
+            if let Err(err) = shutdown.set() {
+                error!(target: "one-shot",
+                       "error setting shutdown flag: {}",
+                       err)
+            } else if caches_join.join().is_err() {
+                error!(target: "one-shot",
+                       "error shutting down name chache threads")
+            }
+        }
+    }
+
     fn create(
         _args: ArgMatches,
         config: Self::Config,
         shutdown: &ShutdownFlag
-    ) -> Result<(Self, Self::CreateCleanup), Self::CreateCleanup> {
+    ) -> Result<(Self, Self::CreateCleanup), Self::CreateErrorCleanup> {
         let (name_caches_config, client_config) = config.take();
         let (caches, caches_join) =
             ThreadedNSNameCaches::create(name_caches_config, shutdown.clone())
@@ -1007,11 +1035,12 @@ where
                        "error creating name caches: {}",
                        err);
 
-                    StandaloneProcessorCreateCleanup { caches: None }
+                    StandaloneProcessorCreateErrorCleanup { caches: None }
                 })?;
         let ctx = StandaloneCtx::new(caches);
         let cleanup = StandaloneProcessorCreateCleanup {
-            caches: Some((shutdown.clone(), caches_join))
+            shutdown: shutdown.clone(),
+            caches_join: caches_join
         };
         let param = UnicastClientParam::new((), ctx);
 
@@ -1029,7 +1058,9 @@ where
                        "error creating multicast client: {}",
                        err);
 
-                Err(cleanup)
+                Err(StandaloneProcessorCreateErrorCleanup {
+                    caches: Some(cleanup)
+                })
             }
         }
     }
@@ -1085,32 +1116,31 @@ where
 
     fn join(
         create_cleanup: Self::CreateCleanup,
-        run_cleanup: Option<Self::RunCleanup>
+        run_cleanup: Self::RunCleanup
     ) {
-        let StandaloneProcessorCreateCleanup { caches } = create_cleanup;
-
         debug!(target: "processor",
                "cleaning up processor");
 
-        if let Some(cleanup) = run_cleanup {
-            debug!(target: "processor",
+        debug!(target: "processor",
                "cleaning up runtime");
 
-            cleanup.cleanup();
-        }
+        run_cleanup.cleanup();
+
+        let StandaloneProcessorCreateCleanup {
+            caches_join,
+            mut shutdown
+        } = create_cleanup;
 
         debug!(target: "processor",
                "cleaning up caches");
 
-        if let Some((mut shutdown, join)) = caches {
-            if let Err(err) = shutdown.set() {
-                error!(target: "one-shot",
-                       "error setting shutdown flag: {}",
-                       err)
-            } else if join.join().is_err() {
-                error!(target: "one-shot",
-                       "error shutting down name chache threads")
-            }
+        if let Err(err) = shutdown.set() {
+            error!(target: "one-shot",
+                   "error setting shutdown flag: {}",
+                   err)
+        } else if caches_join.join().is_err() {
+            error!(target: "one-shot",
+                   "error shutting down name chache threads")
         }
     }
 
@@ -1118,17 +1148,21 @@ where
         create_cleanup: Self::CreateCleanup,
         _run_cleanup: Self::RunErrorCleanup
     ) {
-        let StandaloneProcessorCreateCleanup { caches } = create_cleanup;
+        let StandaloneProcessorCreateCleanup {
+            caches_join,
+            mut shutdown
+        } = create_cleanup;
 
-        if let Some((mut shutdown, join)) = caches {
-            if let Err(err) = shutdown.set() {
-                error!(target: "one-shot",
-                       "error setting shutdown flag: {}",
-                       err)
-            } else if join.join().is_err() {
-                error!(target: "one-shot",
-                       "error shutting down name chache threads")
-            }
+        debug!(target: "processor",
+               "cleaning up caches");
+
+        if let Err(err) = shutdown.set() {
+            error!(target: "one-shot",
+                   "error setting shutdown flag: {}",
+                   err)
+        } else if caches_join.join().is_err() {
+            error!(target: "one-shot",
+                   "error shutting down name chache threads")
         }
     }
 }
