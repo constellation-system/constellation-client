@@ -37,11 +37,12 @@ use constellation_auth::authn::AuthNedDestruct;
 use constellation_channels::resolve::cache::ThreadedNSNameCaches;
 use constellation_common::codec::Encoder;
 use constellation_common::config::Create;
+use constellation_common::error::ErrorScope;
 #[cfg(feature = "standalone")]
 use constellation_common::error::MutexPoison;
 use constellation_common::error::ScopedError;
-use constellation_common::error::WithMutexPoison;
 use constellation_common::retry::Retry;
+use constellation_common::retry::RetryResult;
 #[cfg(feature = "standalone")]
 use constellation_common::shutdown::ShutdownFlag;
 use constellation_common::sync::Notify;
@@ -169,9 +170,16 @@ where
 pub struct OneShotSessionCleanup;
 
 #[derive(Debug)]
-pub enum OneShotError<Create, Seal> {
+pub enum OneShotCreateError<Create, Seal> {
     Create { err: Create },
     Seal { err: Seal }
+}
+
+#[derive(Debug)]
+pub enum OneShotRunError<Inner> {
+    Inner { err: Inner },
+    MutexPoison,
+    Shutdown
 }
 
 impl<Types> OneShotState<Types>
@@ -181,7 +189,7 @@ where
     fn get_batch(
         &self
     ) -> Result<
-        (
+        RetryResult<(
             Option<
                 XactBatch<
                     Types::RoundID,
@@ -194,7 +202,7 @@ where
                 >
             >,
             Option<Instant>
-        ),
+        )>,
         MutexPoison
     > {
         if let Some(msg) = &mut *self.msg.lock().map_err(|_| MutexPoison)? {
@@ -212,12 +220,12 @@ where
                 msg.when = when;
                 msg.nretries += 1;
 
-                Ok((Some(batch), Some(when)))
+                Ok(RetryResult::Success((Some(batch), Some(when))))
             } else {
-                Ok((None, Some(msg.when)))
+                Ok(RetryResult::Retry(msg.when))
             }
         } else {
-            Ok((None, None))
+            Ok(RetryResult::Success((None, None)))
         }
     }
 
@@ -237,6 +245,9 @@ where
 
     #[inline]
     fn complete(&self) -> Result<(), MutexPoison> {
+        debug!(target: "one-shot-msgs",
+               "marking transaction complete");
+
         *self.msg.lock().map_err(|_| MutexPoison)? = None;
 
         Ok(())
@@ -260,7 +271,7 @@ where
     Types: ClientComponentTypes
 {
     type AddMsgsError<Encode>
-        = WithMutexPoison<LargeObjProtoAddOutboundError<Encode>>
+        = OneShotRunError<LargeObjProtoAddOutboundError<Encode>>
     where
         Encode: Debug + Display + ScopedError;
 
@@ -297,18 +308,21 @@ where
             >,
         Enc::Config: Default,
         F: Frags {
-        let (batch, when) = self
+        match self
             .state
             .get_batch()
-            .map_err(|_| WithMutexPoison::MutexPoison)?;
+            .map_err(|_| OneShotRunError::MutexPoison)?
+        {
+            RetryResult::Success((Some(batch), when)) => {
+                sender
+                    .add_outbound(&batch)
+                    .map_err(|err| OneShotRunError::Inner { err: err })?;
 
-        if let Some(batch) = batch {
-            sender
-                .add_outbound(&batch)
-                .map_err(|err| WithMutexPoison::Inner { err: err })?;
+                Ok(when)
+            }
+            RetryResult::Success((None, _)) => Err(OneShotRunError::Shutdown),
+            RetryResult::Retry(when) => Ok(Some(when))
         }
-
-        Ok(when)
     }
 }
 
@@ -371,7 +385,8 @@ where
 {
     type Cleanup = OneShotSessionCleanup;
     type Config = OneShotConfig<App::Config>;
-    type CreateError = OneShotError<App::CreateError, App::CreateSealError>;
+    type CreateError =
+        OneShotCreateError<App::CreateError, App::CreateSealError>;
     type Param = App::Param;
     type StartError = MutexPoison;
 
@@ -385,13 +400,13 @@ where
     > {
         let (app_config, resubmit) = config.take();
         let os = App::create(app_config)
-            .map_err(|err| OneShotError::Create { err: err })?;
+            .map_err(|err| OneShotCreateError::Create { err: err })?;
         let (uuid, version, instance, payload, effects) = os.get_msg(param);
         let req =
             XactUncommittedReq::new(uuid, version, instance, payload, effects);
         let seal = os
             .create_seal(&req)
-            .map_err(|err| OneShotError::Seal { err: err })?;
+            .map_err(|err| OneShotCreateError::Seal { err: err })?;
         let msg = OneShotMsg {
             msg: XactSealed::new(seal, req),
             nretries: 0,
@@ -425,7 +440,20 @@ where
     }
 }
 
-impl<Create, Seal> Display for OneShotError<Create, Seal>
+impl<Inner> ScopedError for OneShotRunError<Inner>
+where
+    Inner: ScopedError
+{
+    fn scope(&self) -> ErrorScope {
+        match self {
+            OneShotRunError::Inner { err } => err.scope(),
+            OneShotRunError::MutexPoison => ErrorScope::Unrecoverable,
+            OneShotRunError::Shutdown => ErrorScope::Shutdown
+        }
+    }
+}
+
+impl<Create, Seal> Display for OneShotCreateError<Create, Seal>
 where
     Create: Display,
     Seal: Display
@@ -435,8 +463,24 @@ where
         f: &mut Formatter<'_>
     ) -> Result<(), Error> {
         match self {
-            OneShotError::Create { err } => err.fmt(f),
-            OneShotError::Seal { err } => err.fmt(f)
+            OneShotCreateError::Create { err } => err.fmt(f),
+            OneShotCreateError::Seal { err } => err.fmt(f)
+        }
+    }
+}
+
+impl<Inner> Display for OneShotRunError<Inner>
+where
+    Inner: Display
+{
+    fn fmt(
+        &self,
+        f: &mut Formatter<'_>
+    ) -> Result<(), Error> {
+        match self {
+            OneShotRunError::Inner { err } => err.fmt(f),
+            OneShotRunError::MutexPoison => write!(f, "mutex poison"),
+            OneShotRunError::Shutdown => write!(f, "shutting down")
         }
     }
 }
@@ -450,12 +494,6 @@ pub struct StandaloneOneShotCreateCleanup {
 #[cfg(feature = "standalone")]
 pub struct StandaloneOneShotCreateErrorCleanup {
     caches: Option<StandaloneOneShotCreateCleanup>
-}
-
-#[cfg(feature = "standalone")]
-pub struct StandaloneOneShotRunCleanup {
-    shutdown: ShutdownFlag,
-    caches_join: JoinHandle<()>
 }
 
 #[cfg(feature = "standalone")]
@@ -484,15 +522,6 @@ pub type SimpleStandaloneOneShot<ClientTypes, BusTypes, App> =
             StandaloneCtx
         >,
         App
-    >;
-
-#[cfg(feature = "standalone")]
-type StandaloneMulticastClientComponentTypes<ClientTypes, BusTypes, App> =
-    SimpleMulticastClientComponentTypes<
-        ClientTypes,
-        BusTypes,
-        OneShotSession<ClientTypes, App>,
-        StandaloneCtx
     >;
 
 #[cfg(feature = "standalone")]

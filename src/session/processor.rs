@@ -404,7 +404,7 @@ where
         F: Frags {
         let (notifies, when) = self.state.get_notifies()?;
 
-        if self.first || notifies.is_empty() {
+        if self.first || !notifies.is_empty() {
             debug!(target: "processor-session-msgs",
                    "sending {} notifies",
                    notifies.len());

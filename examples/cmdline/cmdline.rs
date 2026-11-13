@@ -90,7 +90,7 @@ impl OneShot<u128, TestPayload, TestEffects, TestSeal> for ExampleCmdLine {
     type GetArgError = ExampleGetArgsError;
     type Param = CmdlineMode;
 
-    const CONFIG_FILES: &[&str] = &["example-cmdline.yml"];
+    const CONFIG_FILES: &[&str] = &["example-cmdline.conf"];
     const NAME: &str = "example";
 
     fn get_msg(

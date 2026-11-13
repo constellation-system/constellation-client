@@ -55,7 +55,7 @@ impl Processor<u128, TestPayload, TestEffects, TestResult, TestError>
     for ExampleProcessor
 {
     const CONFIG_FILES: &[&str] = &[&"example-processor.conf"];
-    const DEFAULT_PIDFILE: &str = "/tmp/example-processor.pid";
+    const DEFAULT_PIDFILE: &str = "/tmp/consensus-example-processor.pid";
     const SERVICE_ID: &str = "org.constellation.example";
     const SERVICE_NAME: &str = "example-processor";
 
