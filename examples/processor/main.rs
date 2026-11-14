@@ -1,4 +1,4 @@
-// Copyright © 2024-25 The Johns Hopkins Applied Physics Laboratory LLC.
+// Copyright © 2024-26 The Johns Hopkins Applied Physics Laboratory LLC.
 //
 // This program is free software: you can redistribute it and/or
 // modify it under the terms of the GNU Affero General Public License,
@@ -16,13 +16,12 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
-mod config;
 mod processor;
 
 use constellation_standalone::StandaloneService;
 
-use crate::processor::StandaloneProcessor;
+use crate::processor::StandaloneExampleProcessor;
 
 fn main() {
-    StandaloneProcessor::main()
+    StandaloneExampleProcessor::main()
 }

@@ -1,4 +1,4 @@
-// Copyright © 2024-25 The Johns Hopkins Applied Physics Laboratory LLC.
+// Copyright © 2024-26 The Johns Hopkins Applied Physics Laboratory LLC.
 //
 // This program is free software: you can redistribute it and/or
 // modify it under the terms of the GNU Affero General Public License,
@@ -16,92 +16,451 @@
 // License along with this program.  If not, see
 // <https://www.gnu.org/licenses/>.
 
+use constellation_channels::config::ThreadedNSNameCachesConfig;
+use constellation_common::retry::Retry;
 use constellation_component_common::config::MulticastLargeObjBusConfig;
 use constellation_component_common::config::UnicastLargeObjBusConfig;
+use constellation_component_common::config::XactBatchCodecConfig;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename = "one-shot-client")]
+#[serde(rename_all = "kebab-case")]
+pub struct OneShotClientConfig<
+    Prin,
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+> where
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default {
+    /// Name cache configuration.
+    #[serde(default)]
+    name_caches: ThreadedNSNameCachesConfig,
+    #[serde(flatten)]
+    client: MulticastClientConfig<
+        Prin,
+        OneShotConfig<Session>,
+        Seal,
+        Payload,
+        Effect,
+        Res,
+        Err,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename = "one-shot")]
+#[serde(rename_all = "kebab-case")]
+pub struct OneShotConfig<App> {
+    #[serde(flatten)]
+    app: App,
+    #[serde(default)]
+    resubmit: Retry
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename = "processor-client")]
+#[serde(rename_all = "kebab-case")]
+pub struct ProcessorClientConfig<
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+> where
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default {
+    /// Name cache configuration.
+    #[serde(default)]
+    name_caches: ThreadedNSNameCachesConfig,
+    #[serde(flatten)]
+    client: UnicastClientConfig<
+        ProcessorConfig<Session>,
+        Seal,
+        Payload,
+        Effect,
+        Res,
+        Err,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename = "processor")]
+#[serde(rename_all = "kebab-case")]
+pub struct ProcessorConfig<Proc> {
+    #[serde(flatten)]
+    proc: Proc,
+    #[serde(default)]
+    resubmit: Retry
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename = "multicast-client")]
 #[serde(rename_all = "kebab-case")]
-pub struct MulticastClientConfig<PartyID, Channels, Epochs, Endpoint>
-where
-    Channels: Default,
-    Epochs: Default {
-    /// Party identitfying this node.
-    #[serde(rename = "self")]
-    self_party: PartyID,
+pub struct MulticastClientConfig<
+    Prin,
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+> where
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default {
     #[serde(flatten)]
-    multicast: MulticastLargeObjBusConfig<PartyID, Channels, Epochs, Endpoint>
+    multicast: MulticastLargeObjBusConfig<
+        Prin,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >,
+    #[serde(flatten)]
+    session: Session
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename = "unicast-client")]
 #[serde(rename_all = "kebab-case")]
-pub struct UnicastClientConfig<Channels, Epochs, Endpoint>
-where
-    Channels: Default,
-    Epochs: Default {
+pub struct UnicastClientConfig<
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+> where
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default {
     #[serde(flatten)]
-    unicast: UnicastLargeObjBusConfig<Channels, Epochs, Endpoint>
+    unicast: UnicastLargeObjBusConfig<
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >,
+    #[serde(flatten)]
+    session: Session
 }
 
-impl<Channels, Epochs, Endpoint> UnicastClientConfig<Channels, Epochs, Endpoint>
+impl<
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+>
+    UnicastClientConfig<
+        Session,
+        Seal,
+        Payload,
+        Effect,
+        Res,
+        Err,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >
 where
-    Channels: Default,
-    Epochs: Default
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default
 {
     #[inline]
     pub fn new(
-        unicast: UnicastLargeObjBusConfig<Channels, Epochs, Endpoint>
+        unicast: UnicastLargeObjBusConfig<
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            IDs,
+            Resolver,
+            Epochs,
+            MsgAuthN
+        >,
+        session: Session
     ) -> Self {
-        UnicastClientConfig { unicast: unicast }
+        UnicastClientConfig {
+            unicast: unicast,
+            session: session
+        }
     }
 
     #[inline]
     pub fn unicast(
         &self
-    ) -> &UnicastLargeObjBusConfig<Channels, Epochs, Endpoint> {
+    ) -> &UnicastLargeObjBusConfig<
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    > {
         &self.unicast
     }
 
     #[inline]
-    pub fn take(self) -> UnicastLargeObjBusConfig<Channels, Epochs, Endpoint> {
-        self.unicast
+    pub fn session(&self) -> &Session {
+        &self.session
+    }
+
+    #[inline]
+    pub fn take(
+        self
+    ) -> (
+        UnicastLargeObjBusConfig<
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            IDs,
+            Resolver,
+            Epochs,
+            MsgAuthN
+        >,
+        Session
+    ) {
+        (self.unicast, self.session)
     }
 }
 
-impl<PartyID, Channels, Epochs, Endpoint>
-    MulticastClientConfig<PartyID, Channels, Epochs, Endpoint>
+impl<
+    Prin,
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+>
+    MulticastClientConfig<
+        Prin,
+        Session,
+        Seal,
+        Payload,
+        Effect,
+        Res,
+        Err,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >
 where
-    Channels: Default,
-    Epochs: Default
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default
 {
     #[inline]
     pub fn new(
-        self_party: PartyID,
         multicast: MulticastLargeObjBusConfig<
-            PartyID,
-            Channels,
+            Prin,
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            IDs,
+            Resolver,
             Epochs,
-            Endpoint
-        >
+            MsgAuthN
+        >,
+        session: Session
     ) -> Self {
         MulticastClientConfig {
-            self_party: self_party,
-            multicast: multicast
+            multicast: multicast,
+            session: session
         }
-    }
-
-    #[inline]
-    pub fn self_party(&self) -> &PartyID {
-        &self.self_party
     }
 
     #[inline]
     pub fn multicast(
         &self
-    ) -> &MulticastLargeObjBusConfig<PartyID, Channels, Epochs, Endpoint> {
+    ) -> &MulticastLargeObjBusConfig<
+        Prin,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    > {
         &self.multicast
     }
 
@@ -109,9 +468,264 @@ where
     pub fn take(
         self
     ) -> (
-        PartyID,
-        MulticastLargeObjBusConfig<PartyID, Channels, Epochs, Endpoint>
+        MulticastLargeObjBusConfig<
+            Prin,
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            XactBatchCodecConfig<Seal, Payload, Effect, Res, Err>,
+            IDs,
+            Resolver,
+            Epochs,
+            MsgAuthN
+        >,
+        Session
     ) {
-        (self.self_party, self.multicast)
+        (self.multicast, self.session)
+    }
+}
+
+impl<
+    Prin,
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+>
+    OneShotClientConfig<
+        Prin,
+        Session,
+        Seal,
+        Payload,
+        Effect,
+        Res,
+        Err,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >
+where
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default
+{
+    #[inline]
+    pub fn new(
+        name_caches: ThreadedNSNameCachesConfig,
+        client: MulticastClientConfig<
+            Prin,
+            OneShotConfig<Session>,
+            Seal,
+            Payload,
+            Effect,
+            Res,
+            Err,
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            IDs,
+            Resolver,
+            Epochs,
+            MsgAuthN
+        >
+    ) -> Self {
+        OneShotClientConfig {
+            client: client,
+            name_caches: name_caches
+        }
+    }
+
+    #[inline]
+    pub fn take(
+        self
+    ) -> (
+        ThreadedNSNameCachesConfig,
+        MulticastClientConfig<
+            Prin,
+            OneShotConfig<Session>,
+            Seal,
+            Payload,
+            Effect,
+            Res,
+            Err,
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            IDs,
+            Resolver,
+            Epochs,
+            MsgAuthN
+        >
+    ) {
+        (self.name_caches, self.client)
+    }
+}
+
+impl<App> OneShotConfig<App> {
+    #[inline]
+    pub fn new(
+        app: App,
+        resubmit: Retry
+    ) -> Self {
+        OneShotConfig {
+            resubmit: resubmit,
+            app: app
+        }
+    }
+
+    #[inline]
+    pub fn take(self) -> (App, Retry) {
+        (self.app, self.resubmit)
+    }
+}
+
+impl<
+    Session,
+    Seal,
+    Payload,
+    Effect,
+    Res,
+    Err,
+    Hash,
+    AuthN,
+    ProtoAuthN,
+    Unix,
+    UDP,
+    IDs,
+    Resolver,
+    Epochs,
+    MsgAuthN
+>
+    ProcessorClientConfig<
+        Session,
+        Seal,
+        Payload,
+        Effect,
+        Res,
+        Err,
+        Hash,
+        AuthN,
+        ProtoAuthN,
+        Unix,
+        UDP,
+        IDs,
+        Resolver,
+        Epochs,
+        MsgAuthN
+    >
+where
+    Hash: Default,
+    Unix: Default,
+    UDP: Default,
+    Seal: Default,
+    Payload: Default,
+    Effect: Default,
+    Res: Default,
+    Err: Default,
+    IDs: Default,
+    Epochs: Default,
+    Resolver: Default
+{
+    #[inline]
+    pub fn new(
+        name_caches: ThreadedNSNameCachesConfig,
+        client: UnicastClientConfig<
+            ProcessorConfig<Session>,
+            Seal,
+            Payload,
+            Effect,
+            Res,
+            Err,
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            IDs,
+            Resolver,
+            Epochs,
+            MsgAuthN
+        >
+    ) -> Self {
+        ProcessorClientConfig {
+            client: client,
+            name_caches: name_caches
+        }
+    }
+
+    #[inline]
+    pub fn take(
+        self
+    ) -> (
+        ThreadedNSNameCachesConfig,
+        UnicastClientConfig<
+            ProcessorConfig<Session>,
+            Seal,
+            Payload,
+            Effect,
+            Res,
+            Err,
+            Hash,
+            AuthN,
+            ProtoAuthN,
+            Unix,
+            UDP,
+            IDs,
+            Resolver,
+            Epochs,
+            MsgAuthN
+        >
+    ) {
+        (self.name_caches, self.client)
+    }
+}
+
+impl<Proc> ProcessorConfig<Proc> {
+    #[inline]
+    pub fn new(
+        proc: Proc,
+        resubmit: Retry
+    ) -> Self {
+        ProcessorConfig {
+            proc: proc,
+            resubmit: resubmit
+        }
+    }
+
+    #[inline]
+    pub fn take(self) -> (Proc, Retry) {
+        (self.proc, self.resubmit)
     }
 }
